@@ -16,7 +16,7 @@ import pandas as pd  # Para ler .xlsx
 import google.generativeai as genai
 
 # !!! COLE SUA API KEY AQUI !!!
-GEMINI_API_KEY = "AIzaSyDy8A-SnXeHoXz8TdhMTFTMZyZSH_nw5gs" 
+GEMINI_API_KEY = "" 
 
 try:
     genai.configure(api_key=GEMINI_API_KEY)
