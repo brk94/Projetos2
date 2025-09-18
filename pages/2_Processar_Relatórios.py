@@ -2,7 +2,10 @@ import streamlit as st
 import time
 import pandas as pd
 import requests
+import os
 
+# Define a API_URL no topo do arquivo (depois dos imports)
+API_URL = os.getenv("API_URL", "http://127.0.0.1:8000")
 
 # Configuração da Página
 st.set_page_config(
@@ -30,7 +33,7 @@ if st.button("Iniciar Processamento", type="primary"):
 
         try:
             # Chama a sua API FastAPI local!
-            response = requests.post("http://127.0.0.1:8000/processar-relatorios/", files=files_to_send)
+            response = requests.post(f"{API_URL}/processar-relatorios/", files=files_to_send)
 
             if response.status_code == 200:
                 st.success(f"Processamento concluído! Resposta da API: {response.json()}")

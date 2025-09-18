@@ -6,6 +6,8 @@ import io
 import re  # Importamos o RegEx!
 from datetime import datetime
 import spacy
+import os
+from dotenv import load_dotenv
 
 # --- BIBLIOTECAS DO SCRAPER ---
 from pdfminer.high_level import extract_text
@@ -15,8 +17,8 @@ import pandas as pd  # Para ler .xlsx
 # --- BIBLIOTECAS E CONFIGURAÇÃO DA IA (NÍVEL 3 - GEMINI) ---
 import google.generativeai as genai
 
-# !!! COLE SUA API KEY AQUI !!!
-GEMINI_API_KEY = "" 
+# Lê a API Key do Ambiente
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 
 try:
     genai.configure(api_key=GEMINI_API_KEY)
@@ -34,17 +36,22 @@ except OSError:
     print("Rode: python -m spacy download pt_core_news_md")
     nlp = None 
 
-# --- Configuração da Conexão com o DB Local ---
-DATABASE_URL = "mysql+mysqlconnector://root:-MySQL1596@localhost:3306/mc_sonae_db"
+# --- Configuração da Conexão com o DB (Lê do Ambiente) ---
+DATABASE_URL = os.getenv("DATABASE_URL")
+
+if not DATABASE_URL:
+    print("ERRO CRÍTICO: Variável de ambiente DATABASE_URL não encontrada.")
+    print("Verifique se o arquivo .env existe ou se as variáveis estão configuradas no Render.")
+    exit()
 
 try:
     engine = sqlalchemy.create_engine(DATABASE_URL)
     with engine.connect() as conn:
-        print("Conexão com o Banco de Dados MySQL local estabelecida com sucesso!")
+        # Mensagem genérica que funciona para MySQL ou Postgres
+        print("Conexão com o Banco de Dados (pela DATABASE_URL) estabelecida com sucesso!") 
 except Exception as e:
-    print(f"ERRO: Não foi possível conectar ao Banco de Dados MySQL: {e}")
+    print(f"ERRO: Não foi possível conectar ao Banco de Dados: {e}")
     exit()
-
 
 app = FastAPI(title="API Projeto MC Sonae")
 
