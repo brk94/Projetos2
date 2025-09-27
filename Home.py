@@ -54,7 +54,6 @@ st.markdown(
     /* Isso esconde o menu e o rodapé padrão do Streamlit */
     #MainMenu {visibility: hidden;}
     footer {visibility: hidden;}
-    header {visibility: hidden;}
     </style>
     """,
     unsafe_allow_html=True

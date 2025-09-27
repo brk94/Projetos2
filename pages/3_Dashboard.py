@@ -11,7 +11,7 @@ st.set_page_config(
     layout="wide"
 )
 
-# --- CSS CUSTOMIZADO (Cole seu bloco CSS aqui) ---
+# --- CSS CUSTOMIZADO (Sem mudança) ---
 st.markdown("""
 <style>
      header {visibility: hidden;}
@@ -30,8 +30,23 @@ st.markdown("""
 
 API_URL = "http://127.0.0.1:8000"
 
-# --- FUNÇÕES DE CHAMADA DA API (ATUALIZADAS) ---
-# (O código das funções de API permanece o mesmo)
+# --- FUNÇÕES DE CHAMADA DA API (MODIFICADAS) ---
+@st.cache_data(ttl=10)
+def get_kpi_history(project_code, kpi_name):
+    """
+    NOVA FUNÇÃO: Busca o histórico de um KPI específico.
+    """
+    if not project_code or not kpi_name: return []
+    try:
+        # Nota: O nome do KPI deve ser "URL-encoded" (ex: "Custo Realizado" -> "Custo%20Realizado")
+        # O requests faz isso automaticamente.
+        response = requests.get(f"{API_URL}/projeto/{project_code}/historico-kpi/{kpi_name}")
+        if response.status_code == 200: 
+            return response.json()
+    except requests.ConnectionError: 
+        return None
+    return []
+
 @st.cache_data(ttl=60)
 def get_lista_projetos():
     try:
@@ -40,6 +55,7 @@ def get_lista_projetos():
             return response.json()
     except requests.ConnectionError: return None
     return []
+
 @st.cache_data(ttl=10)
 def get_lista_sprints(project_code):
     if not project_code: return []
@@ -48,6 +64,7 @@ def get_lista_sprints(project_code):
         if response.status_code == 200: return response.json()
     except requests.ConnectionError: return None
     return []
+
 @st.cache_data(ttl=10)
 def get_detalhe_relatorio(report_id):
     if not report_id: return None
@@ -56,20 +73,15 @@ def get_detalhe_relatorio(report_id):
         if response.status_code == 200: return response.json() 
     except requests.ConnectionError: return None
     return None
-@st.cache_data(ttl=10)
-def get_historico_financeiro(project_code):
-    if not project_code: return []
-    try:
-        response = requests.get(f"{API_URL}/projeto/{project_code}/historico-financeiro/")
-        if response.status_code == 200: return response.json() 
-    except requests.ConnectionError: return None
-    return []
+
+# A função get_historico_financeiro FOI REMOVIDA
+# Ela era muito específica e agora está obsoleta.
 
 # --- INÍCIO DO LAYOUT DA PÁGINA ---
 st.title("📑 Visão Detalhada e Histórica do Projeto")
 st.markdown("Selecione um projeto e depois o sprint desejado para carregar o status report.")
 
-# --- MENU DROPDOWN 1: PROJETO ---
+# --- MENU DROPDOWN 1: PROJETO (Sem mudança) ---
 lista_projetos = get_lista_projetos()
 if lista_projetos is None:
     st.error("🚨 **Erro de Conexão:** API do Back-end offline. O servidor `uvicorn` está rodando?")
@@ -81,7 +93,7 @@ project_names_map = {p["name"]: p["code"] for p in lista_projetos}
 selected_name = st.selectbox("Selecione um Projeto:", options=project_names_map.keys())
 selected_code = project_names_map[selected_name]
 
-# --- MENU DROPDOWN 2: SPRINT (A NOVA LÓGICA) ---
+# --- MENU DROPDOWN 2: SPRINT (Sem mudança) ---
 lista_sprints = get_lista_sprints(selected_code)
 if not lista_sprints:
     st.warning(f"O projeto '{selected_name}' não possui nenhum relatório de sprint processado.")
@@ -97,11 +109,12 @@ if not dados_api:
     st.error("Não foi possível carregar os detalhes deste relatório.")
     st.stop()
 
-# --- DADOS PROCESSADOS ---
-projeto = dados_api["projeto"]
-milestones = dados_api["milestones"]
+# --- DADOS PROCESSADOS (MODIFICADO) ---
+projeto = dados_api.get("projeto", {})
+milestones = dados_api.get("milestones", [])
+kpis = dados_api.get("kpis", []) # <- NOVO: Pega a lista de KPIs
 
-# --- LINHA 1: Título e Badge de Status (COM LÓGICA DE DELTA) ---
+# --- LINHA 1: Título e Badge de Status (Sem mudança) ---
 col1, col2 = st.columns([4, 1])
 with col1:
     st.header(f"Status Report: {projeto.get('project_name', 'N/A')}") 
@@ -111,7 +124,7 @@ with col2:
     elif status_atual == "Em Risco": st.markdown(f"<br><span class='badge-yellow'>⚠️ {status_atual}</span>", unsafe_allow_html=True)
     else: st.markdown(f"<br><span class='badge-red'>❌ {status_atual}</span>", unsafe_allow_html=True)
 
-# --- NOVA SEÇÃO DE ANÁLISE DE MUDANÇA DE STATUS ---
+# --- SEÇÃO DE ANÁLISE DE MUDANÇA DE STATUS (Sem mudança) ---
 status_anterior = projeto.get('status_anterior') 
 if status_anterior and status_anterior != status_atual:
     if (status_atual == "Atrasado" and status_anterior == "Em Risco") or \
@@ -123,7 +136,7 @@ elif status_anterior and status_anterior == status_atual:
     st.info(f"ℹ️ **Manutenção de Status:** O projeto permanece **'{status_atual}'** (igual ao sprint anterior).")
 st.divider()
 
-# --- LINHA 2: Metadados ---
+# --- LINHA 2: Metadados (Sem mudança) ---
 with st.container():
     col1, col2, col3, col4 = st.columns(4)
     with col1:
@@ -136,15 +149,15 @@ with st.container():
         st.markdown("🔄 **Sprint Selecionada**"); st.markdown(f"### Sprint {projeto.get('sprint_number', 0)}") 
 
 
-# --- INÍCIO DAS TABS (Voltando para st.tabs) ---
-tab_contexto, tab_financeiro, tab_metas = st.tabs([
+# --- INÍCIO DAS TABS (MODIFICADO) ---
+tab_contexto, tab_kpis, tab_metas = st.tabs([
     "🤖 Sumário, Riscos e Próximos Passos",
-    "💲 Visão Financeira", 
+    "📊 Métricas Chave (KPIs)", # <- ABA FINANCEIRO RENOMEADA
     "📅 Acompanhamento de Metas"
 ])
 
 
-# --- ABA 1: CONTEXTO (SUMÁRIO, RISCOS E PRÓXIMOS PASSOS) ---
+# --- ABA 1: CONTEXTO (SUMÁRIO, RISCOS E PRÓXIMOS PASSOS) (Sem mudança) ---
 with tab_contexto: 
     col1, col2, col3 = st.columns(3) 
     with col1:
@@ -154,23 +167,12 @@ with tab_contexto:
     with col2:
         with st.container(border=True, height=350):
             st.subheader("🛡️ Riscos e Impedimentos")
-            # CÓDIGO CORRIGIDO (MAIS INTELIGENTE E COM FORMATAÇÃO)
-            riscos_texto_bruto = projeto.get('risks_and_impediments') # Pega o valor bruto (pode ser None)
-            riscos_texto_lower = (riscos_texto_bruto or "").lower() # Cria uma versão segura em minúsculas para checagem
-
-            # --- CORREÇÃO PARA O SEU PEDIDO DE QUEBRA DE LINHA ---
-            # Substituímos o caractere de newline (\n) do Python por um newline de Markdown (dois espaços + \n)
-            # Isso força o st.error/success a respeitar as quebras de linha do relatório.
+            riscos_texto_bruto = projeto.get('risks_and_impediments') 
+            riscos_texto_lower = (riscos_texto_bruto or "").lower() 
             riscos_texto_formatado = (riscos_texto_bruto or 'Nenhum risco identificado.').replace('\n', '  \n')
-
-            # LÓGICA CORRIGIDA (para o bug do "Resolvido"):
-            # SE não há texto, OU o texto diz "nenhum risco", OU o texto COMEÇA COM "resolvido"
-            # ENTÃO, é uma notícia boa (Verde).
             if (not riscos_texto_bruto) or ("nenhum risco" in riscos_texto_lower) or (riscos_texto_lower.startswith("resolvido")):
-                # Adicionamos um \n inicial para dar espaço entre o ícone e o texto
                 st.success(f"✔️  \n{riscos_texto_formatado}") 
             else:
-                # SENÃO (é um risco real e ativo, como no Sprint 1, 2 e 3)
                 st.error(f"❌  \n{riscos_texto_formatado}")
     with col3:
         with st.container(border=True, height=350):
@@ -182,37 +184,78 @@ with tab_contexto:
                 st.markdown(next_steps_texto, unsafe_allow_html=True) 
 
 
-# --- ABA 2: FINANCEIRO (KPIs E GRÁFICOS) ---
-with tab_financeiro: 
-    st.subheader("💲 Visão Financeira")
-    alerta_financeiro = projeto.get('variance_text', '')
-    if alerta_financeiro and "estouro" in alerta_financeiro.lower():
-        st.warning(f"🔺 **Alerta de Variação:** {alerta_financeiro}", icon="⚠️")
+# --- ABA 2: KPIs (ANTIGA FINANCEIRO) (MODIFICADA) ---
+with tab_kpis: 
+    st.subheader("📊 Métricas Chave (KPIs) do Período")
     
-    col1, col2, col3 = st.columns(3)
-    budget = projeto.get('budget_total', 0.0)
-    cost_total_acumulado = projeto.get('cost_realized', 0.0) 
-    cost_desta_sprint = projeto.get('cost_delta', 0.0) 
-    with col1:
-        st.markdown(f"""<div class="metric-card metric-card-gray"><span>Orçamento Total</span><br><span>R$ {budget:,.2f}</span></div>""", unsafe_allow_html=True)
-    with col2:
-        st.markdown(f"""<div class="metric-card metric-card-orange"><span>Custo (Apenas Sprint {projeto.get('sprint_number',0)})</span><br><span>+ R$ {cost_desta_sprint:,.2f}</span></div>""", unsafe_allow_html=True)
-    with col3:
-        st.markdown(f"""<div class="metric-card metric-card-gray"><span>Custo Acumulado Total</span><br><span>R$ {cost_total_acumulado:,.2f}</span></div>""", unsafe_allow_html=True)
+    # Tenta encontrar um KPI de variação para o alerta
+    alerta_kpi = next((k for k in kpis if "Variação" in k.get('kpi_name', '')), None)
+    if alerta_kpi and alerta_kpi.get('kpi_value_text') and "estouro" in alerta_kpi['kpi_value_text'].lower():
+        st.warning(f"🔺 **Alerta de Variação:** {alerta_kpi['kpi_value_text']}", icon="⚠️")
+    
+    # Renderiza os KPIs dinamicamente
+    kpis_financeiros = [k for k in kpis if k.get('kpi_category') == 'Financeiro']
+    kpis_outros = [k for k in kpis if k.get('kpi_category') != 'Financeiro']
 
-    st.subheader("Utilização do Orçamento Total")
-    try:
-        if budget > 0:
+    if not kpis:
+        st.info("Nenhuma métrica (KPI) foi extraída para este relatório.")
+    else:
+        # Renderiza KPIs Financeiros
+        if kpis_financeiros:
+            st.markdown("#### Métricas Financeiras")
+            # Usa o CSS customizado para os cards
+            cols_fin = st.columns(len(kpis_financeiros))
+            for i, kpi in enumerate(kpis_financeiros):
+                valor_display = kpi.get('kpi_value_text') or f"{kpi.get('kpi_value_numeric', 0):,.2f}"
+                with cols_fin[i]:
+                    st.markdown(f"""
+                        <div class="metric-card metric-card-gray">
+                        <span>{kpi.get('kpi_name', 'N/A')}</span><br>
+                        <span>{valor_display}</span>
+                        </div>
+                    """, unsafe_allow_html=True)
+        
+        # Renderiza Outros KPIs
+        if kpis_outros:
+            st.markdown("#### Outras Métricas")
+            cols_outros = st.columns(len(kpis_outros))
+            for i, kpi in enumerate(kpis_outros):
+                valor_display = kpi.get('kpi_value_text') or f"{kpi.get('kpi_value_numeric', 0):.2f}"
+                with cols_outros[i]:
+                     st.markdown(f"""
+                        <div class="metric-card metric-card-gray">
+                        <span>{kpi.get('kpi_name', 'N/A')}</span><br>
+                        <span>{valor_display}</span>
+                        </div>
+                    """, unsafe_allow_html=True)
+    
+    st.divider()
+
+    # --- Gráfico de Gauge (Modificado para ler KPIs) ---
+    st.subheader("Utilização do Orçamento Total (se aplicável)")
+    
+    # O budget_total agora vem do objeto 'projeto' (que é o "pai")
+    budget_total_projeto = projeto.get('budget_total', 0.0) 
+    
+    # O Custo Realizado agora vem da lista de KPIs
+    cost_kpi = next((k for k in kpis if k.get('kpi_name') == 'Custo Realizado'), None)
+    
+    if cost_kpi and budget_total_projeto > 0:
+        budget = budget_total_projeto
+        cost_total_acumulado = cost_kpi.get('kpi_value_numeric', 0.0)
+        
+        try:
             utilizacao_pct = (cost_total_acumulado / budget)
             bar_color = "#FFA500" 
             if utilizacao_pct > 0.9: bar_color = "#F8D7DA" 
             elif utilizacao_pct > 0.75: bar_color = "#FFF3CD" 
+            
             fig = go.Figure(go.Indicator(
-                mode = "gauge+number+delta", value = cost_total_acumulado,
+                mode = "gauge+number", # Simplificado sem o 'delta'
+                value = cost_total_acumulado,
                 number = {'prefix': "R$ ", 'valueformat': ',.2f'},
                 domain = {'x': [0, 1], 'y': [0, 1]},
                 title = {'text': f"Custo Acumulado ({utilizacao_pct:.1%}) <br> Orçamento Total: R$ {budget:,.2f}", 'font': {'size': 16}},
-                delta = {'reference': (cost_total_acumulado - cost_desta_sprint), 'increasing': {'color': "#721C24"}, 'prefix': "+ R$", 'valueformat': ',.2f'},
                 gauge = {
                     'axis': {'range': [0, budget], 'tickwidth': 1, 'tickcolor': "darkblue"},
                     'bar': {'color': bar_color}, 'bgcolor': "white", 'borderwidth': 2, 'bordercolor': "gray",
@@ -225,42 +268,67 @@ with tab_financeiro:
             ))
             fig.update_layout(height=350, margin=dict(l=20, r=20, t=80, b=20))
             st.plotly_chart(fig, use_container_width=True)
-        else:
-            st.info("Orçamento Total não definido (R$ 0,00). Não é possível exibir o medidor.")
-    except ZeroDivisionError: 
-        st.info("Orçamento Total é zero. Não é possível exibir o medidor.")
+            
+        except ZeroDivisionError: 
+            st.info("Orçamento Total é zero. Não é possível exibir o medidor.")
+    else:
+        st.info("KPIs de 'Custo Realizado' não encontrados neste relatório ou 'Orçamento Total' não definido para o projeto. Não é possível exibir o medidor.")
         
     st.divider()
+    
+    # --- Gráfico de Tendência (MODIFICADO DE VOLTA) ---
     st.subheader("📈 Análise de Tendência (Burn Rate)")
-    historico_data = get_historico_financeiro(selected_code) 
+    
+    # Chama a nova função, buscando especificamente o KPI "Custo Realizado"
+    historico_data = get_kpi_history(selected_code, "Custo Realizado") 
+    
     if historico_data and len(historico_data) > 1:
         try:
             df_historico = pd.DataFrame(historico_data)
-            df_historico = df_historico.rename(columns={"sprint_number": "Sprint", "cost_realized": "Custo Acumulado", "budget_total": "Orçamento Total (Teto)"})
+            
+            # Renomeia as colunas para bater com o que o gráfico espera
+            df_historico = df_historico.rename(columns={
+                "sprint_number": "Sprint", 
+                "cost_realized": "Custo Acumulado", 
+                "budget_total": "Orçamento Total (Teto)"
+            })
+            
+            # Recria o gráfico (este é o código do seu arquivo original)
             df_melted = df_historico.melt('Sprint', var_name='Métrica', value_name='Valor (R$)')
+            
             base = alt.Chart(df_melted).mark_line(point=True).encode(
-                x=alt.X('Sprint:O', title='Sprint'), y=alt.Y('Valor (R$):Q', title='Valor (R$)'),
+                x=alt.X('Sprint:O', title='Sprint'), 
+                y=alt.Y('Valor (R$):Q', title='Valor (R$)'),
                 tooltip=['Sprint', 'Métrica', 'Valor (R$)']
             ).interactive() 
-            domain_ = ['Custo Acumulado', 'Orçamento Total (Teto)']; range_ = ['#FFA500', '#1C83E1'] 
-            chart_with_colors = base.encode(color=alt.Color('Métrica', scale=alt.Scale(domain=domain_, range=range_)))
+            
+            domain_ = ['Custo Acumulado', 'Orçamento Total (Teto)']
+            range_ = ['#FFA500', '#1C83E1'] 
+            
+            chart_with_colors = base.encode(
+                color=alt.Color('Métrica', scale=alt.Scale(domain=domain_, range=range_))
+            )
+            
             st.altair_chart(chart_with_colors, use_container_width=True)
+            
         except Exception as e:
-            st.error(f"Erro ao renderizar gráfico: {e}"); st.write(df_historico) 
+            st.error(f"Erro ao renderizar gráfico: {e}")
+            st.write(df_historico) 
+            
     elif historico_data and len(historico_data) == 1:
-        st.info("Um gráfico de tendência aparecerá assim que você enviar o próximo relatório de Sprint.")
+        st.info("O gráfico de tendência (Burn Rate) aparecerá assim que você enviar o próximo relatório de Sprint.")
     else:
-        st.warning("Não há dados históricos suficientes para gerar um gráfico de tendência.")
+        st.warning("Não há dados históricos suficientes (com o KPI 'Custo Realizado') para gerar um gráfico de tendência.")
         
 
-# --- ABA 3: METAS (MILESTONES) ---
+# --- ABA 3: METAS (MILESTONES) (Sem mudança) ---
 with tab_metas: 
     
     if milestones:
         df_milestones = pd.DataFrame(milestones)
         df_milestones.index = df_milestones.index + 1
         
-        # --- Bloco do Donut Chart (com cores novas) ---
+        # --- Bloco do Donut Chart (Sem mudança) ---
         st.subheader("Resumo Visual dos Status")
         try:
             status_counts = df_milestones['status'].value_counts().reset_index()
@@ -281,20 +349,16 @@ with tab_metas:
             
         st.divider()
         
-        # --- Bloco da Tabela ---
+        # --- Bloco da Tabela (Sem mudança) ---
         st.subheader(f"📅 Acompanhamento de Milestones (do Sprint {projeto.get('sprint_number', 0)})")
 
-        # <--- MUDANÇA AQUI: Bloco do Slicer e lógica de filtro REMOVIDOS ---
-        # O 'df_para_exibir' agora é apenas o 'df_milestones'
         df_para_exibir = df_milestones
-        # --- FIM DA REMOÇÃO ---
 
         def highlight_slippage(row):
             return ['background-color: #FFF2E6'] * len(row) if row.get('slippage', False) else [''] * len(row)
 
         try:
             st.dataframe(
-                # <--- MUDANÇA AQUI: Voltando a usar 'df_milestones' diretamente (ou 'df_para_exibir' que agora é o mesmo)
                 df_milestones.style.apply(highlight_slippage, axis=1), 
                 use_container_width=True,
                 column_config = {
@@ -307,7 +371,7 @@ with tab_metas:
             )
         except Exception as e:
             st.error(f"Erro ao estilizar tabela de milestones: {e}")
-            st.dataframe(df_milestones, use_container_width=True) # <--- MUDANÇA AQUI
+            st.dataframe(df_milestones, use_container_width=True)
 
     else:
         st.info("Nenhum milestone foi extraído para este relatório de sprint.")
