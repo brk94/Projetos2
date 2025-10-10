@@ -11,14 +11,4 @@ class Retail_XLSXReportParser(ReportParser):
         # Ex: ler um Excel e procurar por "NPS" ou "% Quebra"
         #
         print("Parser de Retalho ainda não implementado.")
-        
-        # Exemplo de como seria:
-        # projeto_data_raw = {"project_code": "PROJ-RETALHO-001", ...}
-        # milestones_data_raw = [{"description": "Lançar produto X", ...}]
-        # kpis_data_raw = [{
-        #    "kpi_name": "NPS", "kpi_category": "Cliente",
-        #    "kpi_value_numeric": 75.0, "kpi_value_text": "75"
-        # }]
-        # return self._processar_ia(projeto_data_raw, milestones_data_raw, kpis_data_raw)
-        
         return None
