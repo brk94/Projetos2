@@ -2,7 +2,7 @@
 import streamlit as st
 
 # navegação/segurança unificadas (já criadas por você)
-from ui_nav import ensure_session_and_perms, render_sidebar
+from ui_nav import garantir_sessao_e_permissoes, render_menu_lateral
 
 # ====== Config da página ======
 st.set_page_config(
@@ -16,8 +16,8 @@ st.set_page_config(
 st.markdown("<style>[data-testid='stSidebarNav']{display:none!important}</style>", unsafe_allow_html=True)
 
 # sessão/permissões + sidebar padrão
-perms = ensure_session_and_perms()
-render_sidebar(perms, current_page="about")
+perms = garantir_sessao_e_permissoes()
+render_menu_lateral(perms, current_page="about")
 
 # ====== Estilização extra (leve) ======
 st.markdown(

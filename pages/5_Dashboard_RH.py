@@ -4,7 +4,7 @@ import plotly.express as px
 import plotly.graph_objects as go
 
 # === Navegação/Segurança unificadas ===
-from ui_nav import ensure_session_and_perms, render_sidebar, api_headers
+from ui_nav import garantir_sessao_e_permissoes, render_menu_lateral, api_headers
 
 # 1) Config da página (uma vez só)
 st.set_page_config(
@@ -18,8 +18,8 @@ st.set_page_config(
 st.markdown("<style>[data-testid='stSidebarNav']{display:none!important}</style>", unsafe_allow_html=True)
 
 # 2) Sessão + permissões + sidebar
-perms = ensure_session_and_perms()
-render_sidebar(perms, current_page="dash_rh")
+perms = garantir_sessao_e_permissoes()
+render_menu_lateral(perms, current_page="dash_rh")
 
 # Se não puder ver dashboards, bloqueia
 if "view_pagina_dashboards" not in perms:

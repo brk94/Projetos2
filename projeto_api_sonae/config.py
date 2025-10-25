@@ -1,4 +1,18 @@
-# config.py
+"""
+Configuração de ambiente, segurança, banco de dados e serviços externos.
+
+Seções:
+- Imports
+- .env (carregamento de variáveis)
+- Configurações de aplicação/segurança
+- Banco de Dados (ORM)
+- Serviços Externos (Gemini / SpaCy)
+"""
+
+# ======================================================================================
+# Imports
+# ======================================================================================
+
 import os
 from dotenv import load_dotenv
 import sqlalchemy
@@ -6,10 +20,15 @@ from sqlalchemy.orm import sessionmaker, declarative_base
 import spacy
 import google.generativeai as genai
 
-# Carrega as variáveis do arquivo .env para o ambiente
+# ======================================================================================
+# .env — Carregamento de variáveis de ambiente
+# ======================================================================================
+# Observação: não altera como as variáveis são lidas; apenas documenta.
 load_dotenv()
 
-# --- Configurações de Aplicação e Segurança ---
+# ======================================================================================
+# Configurações de Aplicação e Segurança (mantidas)
+# ======================================================================================
 # Lidas do ambiente e convertidas para os tipos corretos aqui.
 SECRET_KEY = os.getenv("SECRET_KEY")
 ALGORITHM = os.getenv("ALGORITHM", "HS256")
@@ -18,7 +37,12 @@ REFRESH_TOKEN_EXPIRE_DAYS = int(os.getenv("REFRESH_TOKEN_EXPIRE_DAYS", 7))
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 DATABASE_URL = os.getenv("DATABASE_URL")
 
-# --- Inicialização da Conexão com o DB (COM ORM) ---
+# ======================================================================================
+# Banco de Dados — Inicialização da conexão ORM (mantido)
+# ======================================================================================
+# Notas:
+# - Usa `DATABASE_URL` do .env.
+# - Mantemos prints e fallbacks (engine=None, Base=object) exatamente como no original.
 try:
     engine = sqlalchemy.create_engine(DATABASE_URL)
     SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
@@ -31,10 +55,15 @@ except Exception as e:
     SessionLocal = None
     Base = object
 
-# --- Inicialização de Serviços Externos (IA e NLP) ---
+# ======================================================================================
+# Serviços Externos — IA (Gemini) e NLP (SpaCy) (mantido)
+# ======================================================================================
+# Notas:
+# - Mantém exatamente a mesma forma de configuração e tratamento de erro.
+# - Em caso de problema, os objetos continuam virando None.
 try:
     genai.configure(api_key=GEMINI_API_KEY)
-    gemini_model = genai.GenerativeModel('gemini-1.5-flash')
+    gemini_model = genai.GenerativeModel('gemini-2.5-pro')
     gemini_generation_config = genai.types.GenerationConfig(temperature=0.0)
     print("Configuração da API Gemini carregada com sucesso!")
 except Exception as e:

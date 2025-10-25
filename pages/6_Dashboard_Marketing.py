@@ -4,7 +4,7 @@ import plotly.graph_objects as go
 import numpy as np
 
 # Navegação/segurança unificadas
-from ui_nav import ensure_session_and_perms, render_sidebar
+from ui_nav import garantir_sessao_e_permissoes, render_menu_lateral
 
 # ===== Config página =====
 st.set_page_config(
@@ -18,8 +18,8 @@ st.set_page_config(
 st.markdown("<style>[data-testid='stSidebarNav']{display:none!important}</style>", unsafe_allow_html=True)
 
 # ===== Sessão/permissões + sidebar =====
-perms = ensure_session_and_perms()
-render_sidebar(perms, current_page="dash_mkt")
+perms = garantir_sessao_e_permissoes()
+render_menu_lateral(perms, current_page="dash_mkt")
 
 # Bloqueio por permissão
 if "view_pagina_dashboards" not in perms:
