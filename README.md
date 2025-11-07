@@ -26,12 +26,13 @@ O sistema integra **Frontend (Streamlit)**, **API (FastAPI)** e **Dados (SQLAlch
 
 ## 2. Fluxo de Ponta a Ponta
 
+<pre>
 [Login (Streamlit)]
   │  gera JWT (access) + refresh
   ▼
 [Menu por Perfil / RBAC]
   │  UI mostra só o que o perfil pode acessar
-  ├──► [Admin: Usuários & Permissões] ──► (valida na API)
+  ├──► [Admin: Usuários &amp; Permissões] ──► (valida na API)
   │
   ▼
 [Upload de Relatório (TI)]
@@ -50,6 +51,7 @@ O sistema integra **Frontend (Streamlit)**, **API (FastAPI)** e **Dados (SQLAlch
   │  dashboards consultam via API
   ▼
 [Dashboards (TI) via API]
+</pre>
 
 Resumo: **Login** gera token → **permissões** moldam a UI → **Upload** aciona **parser** → **persistência** no **MySQL** → **dashboards** consomem a API.
 
