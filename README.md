@@ -15,7 +15,6 @@
 - [9. Banco de Dados (ORM)](#9-banco-de-dados-orm)
 - [10. Segurança (JWT + Refresh)](#10-segurança-jwt--refresh)
 - [11. Roteiro de Demonstração](#11-roteiro-de-demonstração)
-- [12. Roadmap](#12-roadmap)
 
 ---
 
