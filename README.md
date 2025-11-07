@@ -26,16 +26,30 @@ O sistema integra **Frontend (Streamlit)**, **API (FastAPI)** e **Dados (SQLAlch
 
 ## 2. Fluxo de Ponta a Ponta
 
-flowchart LR
-  A[Login] -->|JWT access| B[Menu (RBAC)]
-  B --> C[Upload]
-  C --> D[API: validacao e roteamento]
-  D --> E[Factory → Parser TI]
-  E --> F[Extracao: KPIs e Marcos]
-  F --> G[(MySQL)]
-  G --> H[Dashboards TI]
-  B --> I[Admin]
-  I --> D
+[Login (Streamlit)]
+        │  gera JWT (access) + refresh
+        ▼
+[Menu por Perfil / RBAC]
+        │  UI mostra só o que o perfil pode acessar
+        ├──► [Admin: Usuários & Permissões] ──► (valida na API)
+        │
+        ▼
+[Upload de Relatório (TI)]
+        │  envia arquivo → API valida e roteia
+        ▼
+[API FastAPI: validação e roteamento]
+        │  chama fábrica de parsers por área
+        ▼
+[Factory → Parser (ex.: TI)]
+        │  extrai KPIs, marcos, período/sprint, etc.
+        ▼
+[Serviços / ORM]
+        │  persiste dados
+        ▼
+(MySQL)
+        │  dashboards consultam via API
+        ▼
+[Dashboards (TI) via API]
 
 Resumo: **Login** gera token → **permissões** moldam a UI → **Upload** aciona **parser** → **persistência** no **MySQL** → **dashboards** consomem a API.
 
