@@ -26,18 +26,16 @@ O sistema integra **Frontend (Streamlit)**, **API (FastAPI)** e **Dados (SQLAlch
 
 ## 2. Fluxo de Ponta a Ponta
 
-```mermaid
 flowchart LR
-    A[Login (Streamlit)] -->|JWT Access| B(Menu por Perfil/RBAC)
-    B --> C[Upload de Relatório (TI)]
-    C --> D[API FastAPI: validação & roteamento]
-    D --> E[Factory → Parser da Área (ex.: TI)]
-    E --> F[Extração (KPIs, Marcos, Etc.)]
-    F --> G[Serviços/ORM → MySQL]
-    G --> H[Dashboards (TI) via API]
-    B --> I[Admin: Usuários/Permissões]
-    I --> D
-```
+  A[Login] -->|JWT access| B[Menu (RBAC)]
+  B --> C[Upload]
+  C --> D[API: validacao e roteamento]
+  D --> E[Factory → Parser TI]
+  E --> F[Extracao: KPIs e Marcos]
+  F --> G[(MySQL)]
+  G --> H[Dashboards TI]
+  B --> I[Admin]
+  I --> D
 
 Resumo: **Login** gera token → **permissões** moldam a UI → **Upload** aciona **parser** → **persistência** no **MySQL** → **dashboards** consomem a API.
 
