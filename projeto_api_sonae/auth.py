@@ -18,7 +18,7 @@ from jose import JWTError, jwt
 from sqlalchemy.orm import Session
 from datetime import timedelta
 
-# Imports de módulos locais (mantidos; não alterar nomes)
+# Imports de módulos locais
 from . import models, config, services
 from .services import DatabaseRepository  # Para tipagem
 from . import main  # Acessa instâncias globais inicializadas em main

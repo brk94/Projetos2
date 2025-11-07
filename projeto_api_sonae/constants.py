@@ -15,8 +15,6 @@ from .models import AreaNegocioEnum  # Enum de áreas de negócio
 # ======================================================================================
 # Áreas de Negócio — listas auxiliares
 # ======================================================================================
-# Mantemos explicitamente a ordem e os itens conforme o original para
-# evitar impacto em validações/ordenadores que assumem essa sequência.
 ALL_TYPES = [
     AreaNegocioEnum.TI,
     AreaNegocioEnum.RETALHO,

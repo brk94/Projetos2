@@ -71,7 +71,6 @@ class AcessoIn(BaseModel):
 # ======================================================================================
 # Inicialização de Serviços (AI, ParserFactory, Repository, Auth)
 # ======================================================================================
-# Observação: Bloco try/except preservado; mensagens de log idem.
 try:
     ai_service = services.AIService(
         nlp_model=config.nlp,
@@ -206,9 +205,6 @@ def listar_tipos_upload(_user_email: str = Depends(require_user)) -> List[str]:
 # ======================================================================================
 # Tarefas assíncronas (in‑mem)
 # ======================================================================================
-# Observação: armazenamento simples em memória; adequado para ambiente dev/demo.
-# Em produção: mover para fila/banco (Celery/RQ/DB) se necessário.
-
 tasks = {}
 
 
@@ -225,7 +221,7 @@ def run_tarefa_save(task_id: str, parsed_data: models.ParsedReport, author_id: i
 # Auth: Login (access + refresh) / Refresh / Logout
 # ======================================================================================
 @app.post("/token", response_model=models.TokenPair)
-async def login_para_access_token(form_data: Annotated[OAuth2PasswordRequestForm, Depends()], db=Depends(get_db)):
+async def login_por_access_token(form_data: Annotated[OAuth2PasswordRequestForm, Depends()], db=Depends(get_db)):
     email = (form_data.username or "").strip()
     user = repository.get_usuario_por_email(email=email)
     if not user:
@@ -254,19 +250,19 @@ async def refresh_access_token(payload: models.RefreshIn, db=Depends(get_db)):
     if not rt:
         raise HTTPException(status_code=401, detail="Refresh token inválido.")
     if services.AuthService.refresh_token_expirado(rt):
-        repository.revoke_refresh_token_para_texto_puro(db, plain_token=payload.refresh_token)
+        repository.revogar_refresh_token_para_texto_puro(db, plain_token=payload.refresh_token)
         raise HTTPException(status_code=401, detail="Refresh token expirado.")
 
-    owner_email = repository.get_refresh_token_dono_email(db, plain_token=payload.refresh_token)
-    if not owner_email:
-        repository.revoke_refresh_token_para_texto_puro(db, plain_token=payload.refresh_token)
+    email_usuario = repository.get_refresh_token_dono_email(db, plain_token=payload.refresh_token)
+    if not email_usuario:
+        repository.revogar_refresh_token_para_texto_puro(db, plain_token=payload.refresh_token)
         raise HTTPException(status_code=401, detail="Refresh token inválido.")
 
-    new_access = auth_service.criar_access_token(data={"sub": owner_email})
+    new_access = auth_service.criar_access_token(data={"sub": email_usuario})
     new_refresh_plain = auth_service.criar_refresh_token_texto_puro()
     ok = repository.rotate_refresh_token(db, old_plain_token=payload.refresh_token, new_plain_token=new_refresh_plain)
     if not ok:
-        repository.revoke_refresh_token_para_texto_puro(db, plain_token=payload.refresh_token)
+        repository.revogar_refresh_token_para_texto_puro(db, plain_token=payload.refresh_token)
         raise HTTPException(status_code=401, detail="Refresh token inválido.")
 
     return {"access_token": new_access, "refresh_token": new_refresh_plain, "token_type": "bearer"}
@@ -282,12 +278,12 @@ async def logout(
         raise HTTPException(status_code=401, detail="Usuário não encontrado.")
 
     # Purga global: apaga todos os refresh tokens deste usuário
-    count = repository.revoke_todos_refresh_tokens_do_usuario(user.id_usuario)
+    count = repository.revogar_todos_refresh_tokens_do_usuario(user.id_usuario)
     return {"revoked": count, "mode": "all"}
 
 
 # ======================================================================================
-# Upload de Relatórios (protegido)
+# Upload de Relatórios
 # ======================================================================================
 @app.post("/processar-relatorios/")
 async def processar_relatorios(
@@ -346,7 +342,7 @@ async def processar_relatorios(
 
 
 # ======================================================================================
-# Status da tarefa (protegido)
+# Status da tarefa
 # ======================================================================================
 @app.get("/tasks/status/{task_id}")
 async def get_status_tarefa(
@@ -364,32 +360,22 @@ async def get_status_tarefa(
 # Endpoints de leitura (RBAC)
 # ======================================================================================
 @app.get("/dashboard-executivo/", response_model=models.DashboardStats)
-async def get_dados_dashboard(
-    _perm_check: models.Usuario = Depends(solicitar_permissao("view_pagina_home")),
-):
+async def get_dados_dashboard(_perm_check: models.Usuario = Depends(solicitar_permissao("view_pagina_home")),):
     return repository.get_estatisticas_dashboard()
 
 
 @app.get("/projetos/lista/", response_model=List[models.ProjectListItem])
-async def get_projetos_lista(
-    _perm_check: models.Usuario = Depends(solicitar_permissao("view_pagina_home")),
-):
+async def get_projetos_lista(_perm_check: models.Usuario = Depends(solicitar_permissao("view_pagina_home")),):
     return repository.get_lista_projetos()
 
 
 @app.get("/projeto/{project_code}/lista-sprints/", response_model=List[models.SprintListItem])
-async def get_sprints_do_projeto(
-    project_code: str,
-    _perm_check: models.Usuario = Depends(solicitar_permissao("view_pagina_dashboards")),
-):
+async def get_sprints_do_projeto(project_code: str, _perm_check: models.Usuario = Depends(solicitar_permissao("view_pagina_dashboards")),):
     return repository.get_sprints_do_projeto(project_code)
 
 
 @app.get("/relatorio/detalhe/{report_id}", response_model=models.ReportDetailResponse)
-async def get_detalhe_do_relatorio(
-    report_id: int,
-    _perm_check: models.Usuario = Depends(solicitar_permissao("view_pagina_dashboards")),
-):
+async def get_detalhe_do_relatorio(report_id: int, _perm_check: models.Usuario = Depends(solicitar_permissao("view_pagina_dashboards")),):
     data = repository.get_detalhe_do_relatorio(report_id)
     if not data:
         raise HTTPException(status_code=404, detail="Relatório não encontrado")
@@ -397,16 +383,12 @@ async def get_detalhe_do_relatorio(
 
 
 @app.get("/projeto/{project_code}/historico-kpi/{kpi_name}", response_model=List[models.FinancialHistoryItem])
-async def get_historico_kpi(
-    project_code: str,
-    kpi_name: str,
-    _perm_check: models.Usuario = Depends(solicitar_permissao("view_pagina_dashboards")),
-):
+async def get_historico_kpi(project_code: str, kpi_name: str, _perm_check: models.Usuario = Depends(solicitar_permissao("view_pagina_dashboards")),):
     return repository.get_historico_kpi(project_code, kpi_name)
 
 
 # ======================================================================================
-# Admin: Utilitário require_admin (reaproveitado)
+# Admin: Utilitário require_admin
 # ======================================================================================
 
 def require_admin(_user_email: str = Depends(require_user)):
@@ -431,7 +413,7 @@ def solicitar_acesso(body: AccessRequestIn):
             senha=body.senha,
             setor=body.setor,
             justificativa=body.justificativa,
-            cargo=body.cargo,  # persiste o cargo escolhido pelo solicitante
+            cargo=body.cargo,
         )
         return {"message": "Solicitação registrada com sucesso."}
     except RuntimeError as re:
@@ -490,7 +472,7 @@ def admin_listar_acessos_usuario(id_usuario: int, _admin = Depends(require_admin
 @app.post("/admin/usuarios/{id_usuario}/acessos", status_code=201, tags=["admin"])
 def admin_conceder_acesso_usuario(id_usuario: int, body: AcessoIn, _admin = Depends(require_admin)):
     # reaproveita o serviço que JÁ COMMITA
-    return repository.grant_acesso_projeto(
+    return repository.garantir_acesso_projeto(
         codigo_projeto=body.codigo_projeto,
         id_usuario=id_usuario,
         papel=body.papel,
@@ -499,7 +481,7 @@ def admin_conceder_acesso_usuario(id_usuario: int, body: AcessoIn, _admin = Depe
 
 @app.delete("/admin/usuarios/{id_usuario}/acessos/{codigo_projeto}", status_code=204, tags=["admin"])
 def admin_revogar_acesso_usuario(id_usuario: int, codigo_projeto: str, _admin = Depends(require_admin)):
-    repository.revoke_acesso_projeto(
+    repository.revogar_acesso_projeto(
         codigo_projeto=codigo_projeto,
         id_usuario=id_usuario,
     )
@@ -544,8 +526,8 @@ def restore_projeto(
 ):
     ok = repository.restaurar_projeto(
         codigo_projeto=codigo,
-        user_id=admin.id_usuario,   # <— nome correto do parâmetro
-        is_admin=True               # <— é admin, então libera
+        user_id=admin.id_usuario,   
+        is_admin=True               
     )
     if not ok:
         raise HTTPException(status_code=404, detail="Projeto não encontrado.")
@@ -605,11 +587,11 @@ def admin_list_acessos(codigo: str, _admin = Depends(require_admin)):
 
 @app.post("/admin/projetos/{codigo}/acessos", tags=["admin"])
 def admin_grant_acesso(codigo: str, id_usuario: int = Body(...), papel: str = Body("Visualizador"), _admin = Depends(require_admin)):
-    repository.grant_acesso_projeto(codigo_projeto=codigo, id_usuario=id_usuario, papel=papel)
+    repository.garantir_acesso_projeto(codigo_projeto=codigo, id_usuario=id_usuario, papel=papel)
     return {"message": "Acesso concedido."}
 
 
 @app.delete("/admin/projetos/{codigo}/acessos/{id_usuario}", tags=["admin"])
 def admin_revoke_acesso(codigo: str, id_usuario: int, _admin = Depends(require_admin)):
-    repository.revoke_acesso_projeto(codigo_projeto=codigo, id_usuario=id_usuario)
+    repository.revogar_acesso_projeto(codigo_projeto=codigo, id_usuario=id_usuario)
     return {"message": "Acesso removido."}

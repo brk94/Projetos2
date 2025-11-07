@@ -24,6 +24,10 @@ from collections import Counter
 from datetime import datetime
 from ui_nav import garantir_sessao_e_permissoes, render_menu_lateral, req_get, req_post, req_delete
 
+from pathlib import Path
+from base64 import b64encode
+
+
 # Config da página (título/ícone/layout) + CSS para esconder a nav padrão
 st.set_page_config(page_title="Gerenciar Exclusões", page_icon="🗑️", layout="wide")
 st.markdown(
@@ -35,6 +39,22 @@ button[kind="header"]{display:none!important}
 """,
     unsafe_allow_html=True,
 )
+
+ICON_PATH = Path(__file__).parent / "images" / "remove.png"
+icon_b64 = b64encode(ICON_PATH.read_bytes()).decode()
+
+st.markdown(
+    f"""
+<div style="display:flex;align-items:center;gap:8px;">
+  <img src="data:image/png;base64,{icon_b64}" alt="Remove icon"
+       style="width:48px;height:48px;object-fit:contain;border-radius:4px;" />
+  <h1 style="margin:0;">Gerenciar Exclusões</h1>
+</div>
+""",
+    unsafe_allow_html=True,
+)
+
+st.caption("Gerencie projetos marcados com Soft Delete. Você pode restaurá-los ou excluí-los permanentemente.")
 
 # ======================================================================================
 # Gate de sessão/permissão (early‑exit)
@@ -51,9 +71,6 @@ if not ( {"gerenciar_usuarios", "gerenciar_papeis", "excluir_relatorio"} & perms
          or "view_pagina_admin_exclusoes" in perms_lower ):
     st.warning("Página não disponível para seu perfil.")
     st.stop()
-
-st.title("🗑️ Gerenciar Exclusões")
-st.caption("Gerencie projetos marcados com Soft Delete. Você pode restaurá-los ou excluí-los permanentemente.")
 
 # Domínio de setores (usado em filtros e KPIs)
 SETORES = ["Retalho", "TI", "Marketing", "RH"]
@@ -96,19 +113,87 @@ except Exception as e:
     st.stop()
 
 # ======================================================================================
-# KPIs rápidos (visão geral)
+# KPIs rápidos
 # ======================================================================================
-from collections import Counter as _CounterAlias  # (só para deixar explícito o uso)
 _total = len(data)
 _by_setor = Counter([d.get("area_negocio") or "—" for d in data])
-col0, col1, col2, col3, col4 = st.columns([1.2, 1, 1, 1, 1])
-with col0: st.metric("Total de Exclusões", _total)
-with col1: st.metric("Exclusões Marketing", _by_setor.get("Marketing", 0))
-with col2: st.metric("Exclusões Retalho", _by_setor.get("Retalho", 0))
-with col3: st.metric("Exclusões TI", _by_setor.get("TI", 0))
-with col4: st.metric("Exclusões RH", _by_setor.get("RH", 0))
 
-st.divider()
+tot_ti          = _by_setor.get("TI", 0)
+tot_retalho     = _by_setor.get("Retalho", 0)
+tot_marketing   = _by_setor.get("Marketing", 0)
+tot_rh          = _by_setor.get("RH", 0)
+
+st.markdown(f"""
+<div class="kpi-card">
+  <div class="kpi-grid">
+    <div class="kpi-item" style="--accent:#F59E0B">
+      <div class="kpi-copy">
+        <div class="kpi-label">Total de Exclusões</div>
+        <div class="kpi-value">{_total}</div>
+      </div>
+      <span class="kpi-icon">📄</span>
+    </div>
+    <div class="kpi-item" style="--accent:#10B981">
+      <div class="kpi-copy">
+        <div class="kpi-label">Exclusões TI</div>
+        <div class="kpi-value">{tot_ti}</div>
+      </div>
+      <span class="kpi-icon">🖥️</span>
+    </div>
+    <div class="kpi-item" style="--accent:#F59E0B">
+      <div class="kpi-copy">
+        <div class="kpi-label">Exclusões Retalho</div>
+        <div class="kpi-value">{tot_retalho}</div>
+      </div>
+      <span class="kpi-icon">🛒	</span>
+    </div>
+    <div class="kpi-item" style="--accent:#3B82F6">
+      <div class="kpi-copy">
+        <div class="kpi-label">Exclusões Marketing</div>
+        <div class="kpi-value">{tot_marketing}</div>
+      </div>
+      <span class="kpi-icon">📊</span>
+    </div>
+    <div class="kpi-item" style="--accent:#8B5CF6">
+      <div class="kpi-copy">
+        <div class="kpi-label">Exclusões RH</div>
+        <div class="kpi-value">{tot_rh}</div>
+      </div>
+      <span class="kpi-icon">👤</span>
+    </div>
+  </div>
+</div>
+
+<style>
+/* Card único dos KPIs — escopo local */
+.kpi-card{{
+  background:#FFFFFF; border:1px solid #E2E8F0; border-radius:16px;
+  padding:12px 14px; margin-bottom:12px;
+}}
+.kpi-grid{{
+  display:grid; grid-template-columns:repeat(5, 1fr); gap:0;
+}}
+.kpi-item{{
+  position:relative; display:flex; align-items:center; justify-content:space-between;
+  padding:12px 16px; border-right:1px solid #E5E7EB;
+}}
+.kpi-item:last-child{{ border-right:none; }}
+.kpi-item::before{{
+  content:""; position:absolute; left:8px; top:10px; bottom:10px; width:4px;
+  background:var(--accent); border-radius:4px;
+}}
+.kpi-copy{{ padding-left:12px; }}
+.kpi-label{{ font-size:.9rem; color:#475569; margin-bottom:4px; }}
+.kpi-value{{ font-weight:700; font-size:1.25rem; color:var(--accent); }}
+.kpi-icon{{ opacity:.9; font-size:1.15rem; }}
+
+@media (max-width: 1100px){{
+  .kpi-grid{{ grid-template-columns:repeat(2,1fr); }}
+  .kpi-item{{ border-right:none; border-bottom:1px solid #E5E7EB; }}
+  .kpi-item:last-child{{ border-bottom:none; }}
+}}
+</style>
+""", unsafe_allow_html=True)
 
 # ======================================================================================
 # Filtros (texto e setor) + ação de atualizar (invalidar cache)
@@ -209,10 +294,8 @@ for item in items:
                     if st.button("Excluir Definitivamente", type="primary", key=f"hard_{cod}"):
                         excluir_perm(cod, f"{nome} ({cod})", motivo_conf)
 
-st.divider()
-
 # ======================================================================================
-# Atividade recente (pequeno sumário ao fim da página)
+# Atividade recente (card + aviso em card separado)
 # ======================================================================================
 st.subheader("Atividade Recente")
 
@@ -224,8 +307,68 @@ if data:
     c = Counter([d.get("deletado_por_nome") or "—" for d in data])
     mais_ativo = f"{c.most_common(1)[0][0]}"
 
-st.markdown(f"- **Último projeto excluído:** {last_txt}")
-st.markdown(f"- **Usuário mais ativo:** {mais_ativo}")
-st.markdown(f"- **Total de itens nesta lista:** {len(data)}")
+total_itens = len(data)
 
-st.info("A exclusão permanente remove definitivamente os dados do sistema. Verifique se realmente não serão necessários antes de prosseguir.")
+st.markdown(f"""
+<div class="recent-card">
+  <div class="recent-row">
+    <div class="recent-label">Último projeto excluído</div>
+    <div class="recent-value">{last_txt}</div>
+  </div>
+  <div class="recent-row">
+    <div class="recent-label">Usuário mais ativo</div>
+    <div class="recent-value">{mais_ativo}</div>
+  </div>
+  <div class="recent-row">
+    <div class="recent-label">Total de itens nesta lista</div>
+    <div class="recent-value">{total_itens}</div>
+  </div>
+</div>
+
+<div class="note-card">
+  A exclusão permanente remove definitivamente os dados do sistema. Verifique se realmente não serão necessários antes de prosseguir.
+</div>
+
+<style>
+/* Card da Atividade Recente — escopo local */
+.recent-card {{
+  background:#FFFFFF;
+  border:1px solid #E2E8F0;
+  border-radius:16px;
+  padding:14px 16px;
+  margin:8px 0 12px;
+}}
+.recent-row {{
+  display:flex;
+  align-items:flex-start;
+  gap:10px;
+  padding:8px 0;
+  border-bottom:1px dashed #E5E7EB;
+}}
+.recent-row:last-of-type {{ border-bottom:none; }}
+.recent-label {{
+  min-width:220px;
+  color:#475569;
+  font-size:0.95rem;
+}}
+.recent-value {{
+  color:#0F172A;
+  font-weight:600;
+}}
+@media (max-width: 900px) {{
+  .recent-label {{ min-width:160px; }}
+}}
+
+/* Card de aviso separado (amarelo suave) */
+.note-card {{
+  background:#FFFBEB;                /* amarelo clarinho */
+  border:1px solid #F59E0B33;        /* borda sutil */
+  color:#92400E;
+  border-radius:16px;
+  padding:12px 14px;
+  margin:8px 0 16px;
+  font-size:0.93rem;
+  line-height:1.35;
+}}
+</style>
+""", unsafe_allow_html=True)

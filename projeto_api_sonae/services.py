@@ -40,7 +40,7 @@ from sqlalchemy.orm import Session, joinedload
 from sqlalchemy import func, case, desc, delete
 
 # ======================================================================================
-# Configuração de Segurança (via variáveis de ambiente) — MANTIDA
+# Configuração de Segurança (via variáveis de ambiente)
 # ======================================================================================
 SECRET_KEY = os.getenv("SECRET_KEY")
 ALGORITHM = os.getenv("ALGORITHM", "HS256")
@@ -55,7 +55,7 @@ pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 # ======================================================================================
 class AuthService:
     @staticmethod
-    def is_bcrypt_hash(value: Optional[str]) -> bool:
+    def eh_bcrypt_hash(value: Optional[str]) -> bool:
         """Retorna True se o valor parece ser um hash bcrypt ($2a/$2b/$2y)."""
         if not isinstance(value, str):
             return False
@@ -69,19 +69,19 @@ class AuthService:
         """Verifica apenas quando `hashed_password` é de fato bcrypt.
         Em outros formatos (texto puro/legado), retorna False por segurança.
         """
-        if not self.is_bcrypt_hash(hashed_password):
+        if not self.eh_bcrypt_hash(hashed_password):
             return False
         return bcrypt.checkpw(plain_password.encode(), hashed_password.encode())
 
     def verificar_senha_ou_texto_puro(self, plain_password: str, stored_value: str) -> bool:
         """Compat: aceita hash bcrypt **ou** valor em texto puro (legado)."""
-        if self.is_bcrypt_hash(stored_value):
+        if self.eh_bcrypt_hash(stored_value):
             return bcrypt.checkpw(plain_password.encode(), stored_value.encode())
         return hmac.compare_digest(plain_password, stored_value)
 
     def precisa_atualizar_senha(self, stored_value: str) -> bool:
         """Sinaliza necessidade de migração quando não for bcrypt."""
-        return not self.is_bcrypt_hash(stored_value)
+        return not self.eh_bcrypt_hash(stored_value)
 
     def criar_access_token(self, data: dict, expires_delta=None) -> str:
         """Assina um JWT com `sub` e expiração (default: ACCESS_TOKEN_EXPIRE_MINUTES)."""
@@ -355,7 +355,7 @@ class DatabaseRepository:
             return False
 
     # === REVOKE ===
-    def revoke_refresh_token_para_texto_puro(self, db: Session, plain_token: str) -> int:
+    def revogar_refresh_token_para_texto_puro(self, db: Session, plain_token: str) -> int:
         """Revoga um refresh token específico (busca por plaintext → hash interno)."""
         rt = self.get_refresh_token(db, plain_token)
         if not rt:
@@ -364,7 +364,7 @@ class DatabaseRepository:
         db.commit()
         return 1
 
-    def revoke_todos_refresh_tokens_do_usuario(self, user_id: int) -> int:
+    def revogar_todos_refresh_tokens_do_usuario(self, user_id: int) -> int:
         db: Session = self._get_db()
         try:
             result = db.execute(
@@ -710,15 +710,7 @@ class DatabaseRepository:
 
     # --- Solicitações de Acesso (CRUD + aprovação) ---
     def criar_solicitacao_acesso(
-        self,
-        *,
-        nome: str,
-        email: str,
-        senha: str,
-        setor: str,
-        justificativa: str,
-        cargo: str,   # <<< NOVO
-    ) -> None:
+        self, * , nome: str, email: str, senha: str, setor: str, justificativa: str, cargo: str,) -> None:
         """Registra solicitação 'aguardando' (com `senha_hash`) se não houver conflito.
         - Valida cargo permitido e ausência de usuário/pendência.
         - Mantém todos os campos e validações do original.
@@ -769,7 +761,7 @@ class DatabaseRepository:
                 senha_hash=senha_hash,
                 setor=setor_norm,
                 justificativa=just_norm,
-                cargo=cargo_norm,                 # <<< NOVO: persiste cargo pedido
+                cargo=cargo_norm,                 
                 status="aguardando",
                 criado_em=datetime.utcnow(),
             )
@@ -899,7 +891,6 @@ class DatabaseRepository:
         finally:
             db.close()
 
-    # --- Segunda definição de `listar_usuarios` (PREVALECE) ---
     def listar_usuarios(self, q: str | None = None) -> list[dict]:
         """Lista usuários + **um** cargo prioritário (colapsado) por usuário.
         - Usa `CARGO_ORDER` para priorizar: Admin > Gestor > Analista > Diretor > Visualizador.
@@ -1145,7 +1136,7 @@ class DatabaseRepository:
         finally:
             db.close()
 
-    # --- Helpers RBAC p/ soft delete ---
+    # --- Helpers RBAC para soft delete ---
     def eh_admin(self, email: str) -> bool:
         return self.usuario_tem_papel(email, "Administrador")
 
@@ -1177,7 +1168,7 @@ class DatabaseRepository:
         if not proj:
             return False
 
-        # comparação por NOME (modelo guarda string em `gerente_projeto`)
+        # Comparação por NOME (modelo guarda string em `gerente_projeto`)
         return self._norm(proj.gerente_projeto) == self._norm(user.nome)
 
     def listar_projetos_gerenciados(self, *, email: str) -> list[dict]:
@@ -1317,7 +1308,7 @@ class DatabaseRepository:
         finally:
             db.close()
 
-    def grant_acesso_projeto(self, *, codigo_projeto: str, id_usuario: int, papel: str | None = None) -> dict:
+    def garantir_acesso_projeto(self, *, codigo_projeto: str, id_usuario: int, papel: str | None = None) -> dict:
         """Idempotente: garante um vínculo com `papel_final` (param ou deduzido por prioridade)."""
         db = self._get_db()
         try:
@@ -1346,7 +1337,7 @@ class DatabaseRepository:
         finally:
             db.close()
 
-    def revoke_acesso_projeto(self, *, codigo_projeto: str, id_usuario: int) -> dict:
+    def revogar_acesso_projeto(self, *, codigo_projeto: str, id_usuario: int) -> dict:
         """Remove vínculo de acesso ao projeto (se existir)."""
         db = self._get_db()
         try:

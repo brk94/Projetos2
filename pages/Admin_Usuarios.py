@@ -23,6 +23,9 @@ from ui_nav import (
     req_get, req_put, req_post, req_delete,
 )
 
+from pathlib import Path
+from base64 import b64encode
+
 # Config de página + CSS (só visual; mantém comportamento)
 st.set_page_config(page_title="Admin • Gerenciar Usuários", page_icon="👥", layout="wide")
 st.markdown(
@@ -40,6 +43,22 @@ button[kind="header"]{display:none!important}
     unsafe_allow_html=True,
 )
 
+ICON_PATH = Path(__file__).parent / "images" / "gerenciar.png"
+icon_b64 = b64encode(ICON_PATH.read_bytes()).decode()
+
+st.markdown(
+    f"""
+<div style="display:flex;align-items:center;gap:8px;">
+  <img src="data:image/png;base64,{icon_b64}" alt="Gerenciar icon"
+       style="width:48px;height:48px;object-fit:contain;border-radius:4px;" />
+  <h1 style="margin:0;">Gerenciar Usuários</h1>
+</div>
+""",
+    unsafe_allow_html=True,
+)
+
+st.caption("Gerencie usuários e solicitações de acesso ao sistema")
+
 # ======================================================================================
 # Segurança / Navegação (gate inicial)
 # ======================================================================================
@@ -49,8 +68,6 @@ perms_lower = {p.lower() for p in (perms or [])}
 if not ( {"gerenciar_usuarios", "gerenciar_papeis"} <= perms_lower or "view_pagina_admin_usuarios" in perms_lower ):
     st.warning("Página não disponível para seu perfil.")
     st.stop()
-
-st.title("👥 Gerenciar Usuários")
 
 # Toast de feedback pós-ação (via session_state)
 if "flash_toast" in st.session_state:
@@ -142,7 +159,7 @@ tab_usuarios, tab_solicitacoes = st.tabs(["Usuários", "Solicitações de Acesso
 # ABA 1 — USUÁRIOS
 # ======================================================================================
 with tab_usuarios:
-    colf1, colf2 = st.columns([2, 1], vertical_alignment="center")
+    colf1, colf2 = st.columns([2, 1], vertical_alignment="bottom")
     with colf1:
         q = st.text_input("Buscar por nome ou e-mail", placeholder="ex.: joao@mcsonae.com")
     with colf2:

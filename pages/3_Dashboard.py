@@ -238,8 +238,8 @@ if "view_pagina_dashboards" not in perms:
 # - TTLs pequenos favorecem responsividade sem martelar a API a cada rerun.
 # - Tratamento explícito de 401/403 evita ruído para usuários sem acesso.
 
-def buscar_lista_projetos(is_admin_flag: bool):
-    path = "/projetos/lista/" if is_admin_flag else "/me/projetos/visiveis"
+def buscar_lista_projetos(eh_admin_flag: bool):
+    path = "/projetos/lista/" if eh_admin_flag else "/me/projetos/visiveis"
     r = req_get(path)
     if r.status_code == 200: return r.json() or []
     if r.status_code in (401, 403): return []
