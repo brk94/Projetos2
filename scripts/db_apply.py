@@ -48,7 +48,7 @@ def main():
     parser.add_argument("--seed", action="store_true")
     parser.add_argument("--all", action="store_true")
     parser.add_argument("--reset", action="store_true",
-                        help="TRUNCATE ... RESTART IDENTITY CASCADE antes do seed")
+                        help="TRUNCATE RESTART IDENTITY CASCADE antes do seed")
     args = parser.parse_args()
 
     db_url = os.getenv("DATABASE_URL")
@@ -58,14 +58,16 @@ def main():
     engine = create_engine(db_url, future=True)
 
     base = Path(__file__).resolve().parent.parent / "db"
-    schema_file = base / "create.txt"     # <== ajuste aqui se usar outro nome
-    seed_file   = base / "populate.txt"   # <== ajuste aqui se usar outro nome
+    schema_file = base / "create.txt"     # confirme os nomes
+    seed_file   = base / "populate.txt"
 
+    # Só aplica schema se --schema OU --all
     if args.all or args.schema:
         print(f"==> Schema: {schema_file}")
-        run_sql(engine, load_sql_statements(schema_file))
+        run_sql(engine, load_sql_statements(schema_file), ignore_exists=True)
         print("OK schema")
 
+    # Só aplica seed se --seed OU --all
     if args.all or args.seed:
         if args.reset:
             print("==> Resetando tabelas (TRUNCATE … RESTART IDENTITY CASCADE)")
@@ -81,10 +83,8 @@ def main():
               END LOOP;
             END$$;
             """
-            run_sql(engine, load_sql_statements(schema_file), ignore_exists=True)
+            run_sql(engine, [reset_sql])
+
         print(f"==> Seed: {seed_file}")
         run_sql(engine, load_sql_statements(seed_file))
         print("OK seed")
-
-if __name__ == "__main__":
-    main()
