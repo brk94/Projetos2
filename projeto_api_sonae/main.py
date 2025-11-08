@@ -487,6 +487,12 @@ def admin_revogar_acesso_usuario(id_usuario: int, codigo_projeto: str, _admin = 
     )
     return None
 
+@app.delete("/admin/usuarios/{id_usuario}", status_code=204, tags=["admin"])
+def admin_excluir_usuario(id_usuario: int, _admin = Depends(require_admin)):
+    ok = repository.hard_delete_usuario(id_usuario=id_usuario)
+    if not ok:
+        raise HTTPException(status_code=404, detail="Usuário não encontrado.")
+    return None
 
 @app.get("/admin/projetos/lista", response_model=List[models.ProjectListItem], tags=["admin"])
 def admin_listar_projetos(_=Depends(require_admin)):
