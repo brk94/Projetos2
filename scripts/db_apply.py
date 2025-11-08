@@ -1,34 +1,45 @@
 # scripts/db_apply.py
 import os
 import argparse
+import re
 from pathlib import Path
-from sqlalchemy import create_engine, text
+from sqlalchemy import create_engine
+from sqlalchemy.exc import ProgrammingError
+
+def strip_sql_comments(sql: str) -> str:
+    # remove linhas que começam com meta-comandos do psql (\c, \connect, etc.)
+    sql = "\n".join(ln for ln in sql.splitlines() if not ln.strip().startswith("\\"))
+    # remove comentários de bloco /* ... */
+    sql = re.sub(r"/\*.*?\*/", "", sql, flags=re.DOTALL)
+    # remove comentários de linha -- ... (apenas do -- até o fim da linha)
+    sql = re.sub(r"(?m)--.*?$", "", sql)
+    return sql
 
 def load_sql_statements(path: Path):
     raw = path.read_text(encoding="utf-8")
-    # remove linhas de meta-comandos do psql (p.ex.: \c dbname)
-    lines = []
-    for ln in raw.splitlines():
-        if ln.strip().startswith("\\"):  # ignora \c, \connect, etc.
-            continue
-        lines.append(ln)
-    sql = "\n".join(lines)
-    # separa por ';' simples (OK para seus arquivos, que não têm plpgsql)
-    stmts = [s.strip() for s in sql.split(";") if s.strip()]
+    cleaned = strip_sql_comments(raw).strip()
+    # separa por ';' e elimina vazios
+    stmts = [s.strip() for s in cleaned.split(";") if s.strip()]
     return stmts
 
 def run_sql(engine, stmts):
     with engine.begin() as conn:
         for s in stmts:
-            conn.exec_driver_sql(s)
+            try:
+                conn.exec_driver_sql(s)
+            except ProgrammingError as e:
+                # ignora comandos vazios de forma extra defensiva (só por garantia)
+                if "can't execute an empty query" in str(e).lower():
+                    continue
+                raise
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--schema", action="store_true", help="Aplica o schema_postgres.sql")
-    parser.add_argument("--seed", action="store_true", help="Aplica o seed_postgres.sql")
-    parser.add_argument("--all", action="store_true", help="Aplica schema e seed")
+    parser.add_argument("--schema", action="store_true")
+    parser.add_argument("--seed", action="store_true")
+    parser.add_argument("--all", action="store_true")
     parser.add_argument("--reset", action="store_true",
-                        help="Antes do seed: TRUNCATE RESTART IDENTITY CASCADE nas tabelas centrais")
+                        help="TRUNCATE ... RESTART IDENTITY CASCADE antes do seed")
     args = parser.parse_args()
 
     db_url = os.getenv("DATABASE_URL")
@@ -38,8 +49,8 @@ def main():
     engine = create_engine(db_url, future=True)
 
     base = Path(__file__).resolve().parent.parent / "db"
-    schema_file = base / "create.txt"
-    seed_file   = base / "populate.txt"
+    schema_file = base / "create.txt"     # <== ajuste aqui se usar outro nome
+    seed_file   = base / "populate.txt"   # <== ajuste aqui se usar outro nome
 
     if args.all or args.schema:
         print(f"==> Schema: {schema_file}")
