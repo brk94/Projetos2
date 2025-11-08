@@ -22,14 +22,23 @@ def load_sql_statements(path: Path):
     stmts = [s.strip() for s in cleaned.split(";") if s.strip()]
     return stmts
 
-def run_sql(engine, stmts):
+def run_sql(engine, stmts, ignore_exists=False):
     with engine.begin() as conn:
         for s in stmts:
             try:
                 conn.exec_driver_sql(s)
             except ProgrammingError as e:
-                # ignora comandos vazios de forma extra defensiva (só por garantia)
-                if "can't execute an empty query" in str(e).lower():
+                msg = str(e).lower()
+                if ignore_exists and (
+                    "already exists" in msg or
+                    "duplicate table" in msg or
+                    "duplicate object" in msg or
+                    "relation" in msg and "already exists" in msg
+                ):
+                    # segue adiante se já existir
+                    continue
+                # ignora queries vazias por precaução
+                if "can't execute an empty query" in msg:
                     continue
                 raise
 
@@ -72,7 +81,7 @@ def main():
               END LOOP;
             END$$;
             """
-            run_sql(engine, [reset_sql])
+            run_sql(engine, load_sql_statements(schema_file), ignore_exists=True)
         print(f"==> Seed: {seed_file}")
         run_sql(engine, load_sql_statements(seed_file))
         print("OK seed")
