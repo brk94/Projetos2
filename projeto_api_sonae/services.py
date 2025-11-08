@@ -558,7 +558,8 @@ class DatabaseRepository:
             db.close()
 
     def decidir_solicitacao(self, id_solic: int, admin_id: int, decisao: str, motivo: Optional[str] = None):
-        db = self._get_db()
+        """Aprova/Rejeita solicitação de acesso."""
+        db: Session = self._get_db()
         try:
             sol = db.get(models.UsuarioSolicitacaoAcesso, id_solic)
             if not sol:
@@ -567,52 +568,74 @@ class DatabaseRepository:
                 raise RuntimeError("Solicitação já foi decidida.")
 
             decisao_norm = (decisao or "").strip().lower()
-            if decisao_norm not in {"aprovar","rejeitar"}:
+            if decisao_norm not in {"aprovar", "rejeitar"}:
                 raise RuntimeError("Decisão inválida.")
 
+            # Rejeição simples
             if decisao_norm == "rejeitar":
                 sol.status = "rejeitado"
+                sol.motivo_decisao = (motivo or None)
                 sol.decidido_por = admin_id
                 sol.decidido_em = datetime.utcnow()
-                sol.motivo_decisao = (motivo or None)
                 db.commit()
                 return
 
-            papel = db.query(models.Papel).filter(models.Papel.nome == sol.cargo).first()
+            # === Aprovação ===
+            # 1) Resolve papel (fallback para Visualizador)
+            cargo = (sol.cargo or "").strip()
+            papel = db.query(models.Papel).filter(models.Papel.nome == cargo).first()
             if not papel:
-                raise RuntimeError("Papel/cargo não encontrado no sistema.")
+                papel = db.query(models.Papel).filter(models.Papel.nome == "Visualizador").first()
+                if not papel:
+                    raise RuntimeError("Papel/cargo não encontrado (nem fallback Visualizador).")
 
+            # 2) E-mail normalizado + checagem de duplicidade
             email_norm = (sol.email or "").strip().lower()
             if not email_norm:
-                raise RuntimeError("E-mail inválido.")
-            if db.query(models.Usuario).filter(models.Usuario.email == email_norm).first():
+                raise RuntimeError("E-mail da solicitação é inválido.")
+
+            if db.query(models.Usuario.id_usuario).filter(models.Usuario.email == email_norm).first():
                 raise RuntimeError("Já existe um usuário com este e-mail.")
 
+            # 3) Cria usuário (reusa o hash que veio na solicitação)
             novo = models.Usuario(
                 nome=(sol.nome or "").strip(),
                 email=email_norm,
-                senha_hash=sol.senha_hash,
-                setor=(sol.setor or None)
+                senha_hash=sol.senha_hash,  # já está em bcrypt
+                setor=(sol.setor or None),
             )
             db.add(novo)
-            db.flush()
+            db.flush()  # obtém novo.id_usuario
 
-            if not db.query(models.UsuarioPapel).filter(
-                models.UsuarioPapel.id_usuario_fk == novo.id_usuario,
-                models.UsuarioPapel.id_papel_fk == papel.id_papel
-            ).first():
-                db.add(models.UsuarioPapel(id_usuario_fk=novo.id_usuario, id_papel_fk=papel.id_papel))
+            # 4) Vincula papel (sem campos extras)
+            existe = (
+                db.query(models.UsuarioPapel)
+                .filter(
+                    models.UsuarioPapel.id_usuario_fk == novo.id_usuario,
+                    models.UsuarioPapel.id_papel_fk == papel.id_papel,
+                )
+                .first()
+            )
+            if not existe:
+                db.add(models.UsuarioPapel(
+                    id_usuario_fk=novo.id_usuario,
+                    id_papel_fk=papel.id_papel,
+                ))
 
+            # 5) Finaliza decisão da solicitação
             sol.status = "aprovado"
+            sol.motivo_decisao = (motivo or None)
             sol.decidido_por = admin_id
             sol.decidido_em = datetime.utcnow()
-            sol.motivo_decisao = (motivo or None)
+
             db.commit()
+
         except Exception:
             db.rollback()
             raise
         finally:
             db.close()
+
 
     def atualizar_usuario_limitado(self, *, id_usuario: int, nome: str | None, setor: str | None) -> None:
         db = self._get_db()

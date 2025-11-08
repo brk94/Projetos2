@@ -232,12 +232,12 @@ class UsuarioSolicitacaoAcesso(Base):
     decisor = relationship("Usuario", foreign_keys=[decidido_por])
 
     __table_args__ = (
-        # Índice único PARCIAL (PostgreSQL) — apenas enquanto status = 'aguardando'
+        # ÚNICO apenas quando status = 'aguardando'
         Index(
             'uq_solic_email_aguardando',
             'email',
             unique=True,
-            postgresql_where=(text("status = 'aguardando'"))
+            postgresql_where=text("status = 'aguardando'")
         ),
         Index('idx_status_email', 'status', 'email'),
         Index('idx_criado_em', 'criado_em'),
