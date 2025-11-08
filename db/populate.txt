@@ -1,13 +1,17 @@
 -- =====================
--- 1) ESCOPO (Escopos)
+-- 1) Escopos
 -- =====================
 INSERT INTO escopos (id_escopo, tipo, descricao) VALUES
-  (1, 'global', 'Escopo global'),
-  (2, 'restrito', 'Escopo restrito a funcionalidades limitadas');
+  (1, 'global',   'Escopo global'),
+  (2, 'restrito', 'Escopo restrito a funcionalidades limitadas')
+ON CONFLICT (tipo) DO NOTHING;
 
--- ==========================
--- 2) PERMISSÕES (Permissoes)
--- ==========================
+-- alinhar sequência do SERIAL
+SELECT setval(pg_get_serial_sequence('escopos','id_escopo'), COALESCE((SELECT MAX(id_escopo) FROM escopos), 1));
+
+-- =====================
+-- 2) Permissões
+-- =====================
 INSERT INTO permissoes (id_permissao, nome_permissao, descricao) VALUES
   (1,  'view_pagina_home',                 'Acessar a página inicial/executiva.'),
   (2,  'view_pagina_dashboards',           'Acessar a página principal dos dashboards.'),
@@ -19,42 +23,58 @@ INSERT INTO permissoes (id_permissao, nome_permissao, descricao) VALUES
   (8,  'realizar_upload_relatorio',        'Permissão genérica para fazer upload de qualquer relatório.'),
   (9,  'excluir_relatorio',                'Mover um relatório para a lixeira (soft delete).'),
   (10, 'gerenciar_usuarios',               'Criar, editar e excluir usuários.'),
-  (11, 'gerenciar_papeis',                 'Criar e editar papéis e suas permissões.');
+  (11, 'gerenciar_papeis',                 'Criar e editar papéis e suas permissões.')
+ON CONFLICT DO NOTHING;
 
--- =======================
--- 3) PAPÉIS (Papeis)
--- =======================
+SELECT setval(pg_get_serial_sequence('permissoes','id_permissao'), COALESCE((SELECT MAX(id_permissao) FROM permissoes), 1));
+
+-- =====================
+-- 3) Papéis
+-- =====================
 INSERT INTO papeis (id_papel, nome, id_escopo_fk) VALUES
   (1, 'Administrador',      1),
   (2, 'Diretor',            1),
   (3, 'Gestor de Projetos', 1),
   (4, 'Analista',           2),
-  (5, 'Visualizador',       2);
+  (5, 'Visualizador',       2)
+ON CONFLICT DO NOTHING;
+
+SELECT setval(pg_get_serial_sequence('papeis','id_papel'), COALESCE((SELECT MAX(id_papel) FROM papeis), 1));
 
 -- ===============================
--- 4) PAPEL x PERMISSÃO (junção)
+-- 4) Papel x Permissão (junção)
 -- ===============================
-
--- Admin: tudo relevante
+-- Admin: tudo
 INSERT INTO papel_permissoes (id_papel_fk, id_permissao_fk)
-SELECT 1, id_permissao FROM permissoes;
+SELECT 1, p.id_permissao
+FROM permissoes p
+WHERE NOT EXISTS (
+  SELECT 1 FROM papel_permissoes j
+  WHERE j.id_papel_fk = 1 AND j.id_permissao_fk = p.id_permissao
+);
 
--- Diretor: ver home e dashboards (sem upload)
+-- Diretor: ver home e dashboards
 INSERT INTO papel_permissoes (id_papel_fk, id_permissao_fk)
-SELECT 2, id_permissao FROM permissoes
-WHERE nome_permissao IN (
+SELECT 2, p.id_permissao
+FROM permissoes p
+WHERE p.nome_permissao IN (
   'view_pagina_home',
   'view_pagina_dashboards',
   'view_dashboard_ti',
   'view_dashboard_retalho',
   'view_dashboard_rh',
   'view_dashboard_marketing'
+)
+AND NOT EXISTS (
+  SELECT 1 FROM papel_permissoes j
+  WHERE j.id_papel_fk = 2 AND j.id_permissao_fk = p.id_permissao
 );
 
--- Gestor: ver home e dashboards + (opcional) excluir_relatorio
+-- Gestor: home + dashboards + excluir_relatorio
 INSERT INTO papel_permissoes (id_papel_fk, id_permissao_fk)
-SELECT 3, id_permissao FROM permissoes
-WHERE nome_permissao IN (
+SELECT 3, p.id_permissao
+FROM permissoes p
+WHERE p.nome_permissao IN (
   'view_pagina_home',
   'view_pagina_dashboards',
   'view_dashboard_ti',
@@ -62,50 +82,95 @@ WHERE nome_permissao IN (
   'view_dashboard_rh',
   'view_dashboard_marketing',
   'excluir_relatorio'
+)
+AND NOT EXISTS (
+  SELECT 1 FROM papel_permissoes j
+  WHERE j.id_papel_fk = 3 AND j.id_permissao_fk = p.id_permissao
 );
 
--- Analista: apenas upload e página de upload (nada de dashboards)
+-- Analista: upload apenas
 INSERT INTO papel_permissoes (id_papel_fk, id_permissao_fk)
-SELECT 4, id_permissao FROM permissoes
-WHERE nome_permissao IN (
+SELECT 4, p.id_permissao
+FROM permissoes p
+WHERE p.nome_permissao IN (
   'view_pagina_processar_relatorios',
   'realizar_upload_relatorio'
+)
+AND NOT EXISTS (
+  SELECT 1 FROM papel_permissoes j
+  WHERE j.id_papel_fk = 4 AND j.id_permissao_fk = p.id_permissao
 );
 
--- Visualizador: ver home e dashboards (sem upload)
+-- Visualizador: home + dashboards
 INSERT INTO papel_permissoes (id_papel_fk, id_permissao_fk)
-SELECT 5, id_permissao FROM permissoes
-WHERE nome_permissao IN (
+SELECT 5, p.id_permissao
+FROM permissoes p
+WHERE p.nome_permissao IN (
   'view_pagina_home',
   'view_pagina_dashboards',
   'view_dashboard_ti',
   'view_dashboard_retalho',
   'view_dashboard_rh',
   'view_dashboard_marketing'
+)
+AND NOT EXISTS (
+  SELECT 1 FROM papel_permissoes j
+  WHERE j.id_papel_fk = 5 AND j.id_permissao_fk = p.id_permissao
 );
 
--- ======================
--- 5) USUÁRIOS (Usuarios)
--- ======================
--- OBS: Postgres não tem ENUM nativo como MySQL, geralmente usa TYPE customizado ou VARCHAR com CHECK
--- Considere ajustar o tipo da coluna setor conforme sua modelagem.
+-- =====================
+-- 5) Usuários
+-- =====================
+-- ATENÇÃO: apenas o admin abaixo está com hash bcrypt válido.
+-- Inês e Ricardo estão com senha em texto; se sua autenticação exige bcrypt,
+-- crie-os via API/serviço OU substitua por hashes reais.
 
 INSERT INTO usuarios (id_usuario, nome, email, senha_hash, setor, data_criacao, data_atualizacao)
 VALUES
   (1, 'Administrador', 'admin@mcsonae.com',
-     '$2b$12$doyxOVWumhcGMCqk2FtWK.e7YZk/xN.vZ8HkWxhZbyj/v1EJL9IBO',  
-     NULL, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP),
-  (2, 'Inês Pereira', 'ines.pereira@mcsonae.com',
-     'ines123',                
-     'Retalho', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP),
-  (3, 'Ricardo Fernandes', 'ricardo.fernandes@mcsonae.com',
-     'ricardo123',            
-     NULL, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP);
+     '$2b$12$doyxOVWumhcGMCqk2FtWK.e7YZk/xN.vZ8HkWxhZbyj/v1EJL9IBO',
+     NULL, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+ON CONFLICT (email) DO NOTHING;
+
+-- (opcional) usuários de exemplo – **NÃO** vão logar se o backend exigir bcrypt:
+INSERT INTO usuarios (id_usuario, nome, email, senha_hash, setor, data_criacao, data_atualizacao)
+VALUES
+  (2, 'Inês Pereira', 'ines.pereira@mcsonae.com', 'ines123',     'Retalho', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP),
+  (3, 'Ricardo Fernandes', 'ricardo.fernandes@mcsonae.com', 'ricardo123', NULL, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+ON CONFLICT (email) DO NOTHING;
+
+SELECT setval(pg_get_serial_sequence('usuarios','id_usuario'), COALESCE((SELECT MAX(id_usuario) FROM usuarios), 1));
 
 -- ==================================
--- 6) USUÁRIO x PAPEL (Usuario_Papeis)
+-- 6) Usuário x Papel
 -- ==================================
-INSERT INTO usuario_papeis (id_usuario_fk, id_papel_fk) VALUES
-  (1, 1),   -- Admin → Administrador
-  (2, 4),   -- Inês → Analista
-  (3, 3);   -- Ricardo → Gestor de Projetos
+-- Vincula por NOME para não depender de IDs fixos:
+INSERT INTO usuario_papeis (id_usuario_fk, id_papel_fk)
+SELECT u.id_usuario, p.id_papel
+FROM usuarios u
+JOIN papeis p ON p.nome = 'Administrador'
+WHERE u.email = 'admin@mcsonae.com'
+  AND NOT EXISTS (
+    SELECT 1 FROM usuario_papeis up
+    WHERE up.id_usuario_fk = u.id_usuario AND up.id_papel_fk = p.id_papel
+  );
+
+INSERT INTO usuario_papeis (id_usuario_fk, id_papel_fk)
+SELECT u.id_usuario, p.id_papel
+FROM usuarios u
+JOIN papeis p ON p.nome = 'Analista'
+WHERE u.email = 'ines.pereira@mcsonae.com'
+  AND NOT EXISTS (
+    SELECT 1 FROM usuario_papeis up
+    WHERE up.id_usuario_fk = u.id_usuario AND up.id_papel_fk = p.id_papel
+  );
+
+INSERT INTO usuario_papeis (id_usuario_fk, id_papel_fk)
+SELECT u.id_usuario, p.id_papel
+FROM usuarios u
+JOIN papeis p ON p.nome = 'Gestor de Projetos'
+WHERE u.email = 'ricardo.fernandes@mcsonae.com'
+  AND NOT EXISTS (
+    SELECT 1 FROM usuario_papeis up
+    WHERE up.id_usuario_fk = u.id_usuario AND up.id_papel_fk = p.id_papel
+  );
