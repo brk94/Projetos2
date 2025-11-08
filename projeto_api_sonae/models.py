@@ -25,7 +25,7 @@ import enum
 # --- SQLAlchemy ORM ---
 from sqlalchemy import (
     Column, String, BigInteger, Integer, Float, Date, Text, ForeignKey,
-    DateTime, Enum, Boolean, Index, UniqueConstraint, Computed
+    DateTime, Enum, Boolean, Index, UniqueConstraint, Computed, text
 )
 from sqlalchemy.orm import relationship
 from .config import Base
@@ -216,8 +216,11 @@ class UsuarioSolicitacaoAcesso(Base):
     cargo          = Column(String(64),  nullable=False)
     justificativa  = Column(String(512), nullable=False)
 
-    status = Column(Enum('aguardando','aprovado','rejeitado','expirado', name='status_solic'),
-                    nullable=False, default='aguardando')
+    status = Column(
+        Enum('aguardando', 'aprovado', 'rejeitado', 'expirado', name='status_solic'),
+        nullable=False,
+        default='aguardando'
+    )
 
     decidido_por   = Column(BigInteger, ForeignKey("usuarios.id_usuario", ondelete="SET NULL"), nullable=True)
     decidido_em    = Column(DateTime, nullable=True)
@@ -226,15 +229,20 @@ class UsuarioSolicitacaoAcesso(Base):
     criado_em = Column(DateTime, nullable=False, default=datetime.utcnow)
     expira_em = Column(DateTime, nullable=True)
 
-    aguardando = Column(Boolean, Computed("status = 'aguardando'", persisted=True))
-
     decisor = relationship("Usuario", foreign_keys=[decidido_por])
 
     __table_args__ = (
-        UniqueConstraint('email', 'aguardando', name='uq_solic_email_aguardando'),
+        # Índice único PARCIAL (PostgreSQL) — apenas enquanto status = 'aguardando'
+        Index(
+            'uq_solic_email_aguardando',
+            'email',
+            unique=True,
+            postgresql_where=(text("status = 'aguardando'"))
+        ),
         Index('idx_status_email', 'status', 'email'),
         Index('idx_criado_em', 'criado_em'),
     )
+
 
 # ======================================================================================
 # ORM — Acesso por Projeto

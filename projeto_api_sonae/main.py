@@ -109,7 +109,7 @@ def get_db():
 
 
 def require_user(token: str = Depends(oauth2_scheme)) -> str:
-    """Extrai e valida JWT Bearer; retorna o `sub` (e‑mail) do usuário.
+    """Extrai e valida JWT Bearer; retorna o `sub` (e-mail) do usuário.
     - 401 se token inválido, sem `sub` ou sem assinatura válida.
     """
     try:
@@ -203,7 +203,7 @@ def listar_tipos_upload(_user_email: str = Depends(require_user)) -> List[str]:
 
 
 # ======================================================================================
-# Tarefas assíncronas (in‑mem)
+# Tarefas assíncronas (in-mem)
 # ======================================================================================
 tasks = {}
 
@@ -313,7 +313,7 @@ async def processar_relatorios(
     tasks[task_id] = {"status": "pendente"}
     file_stream = io.BytesIO(await file.read())
 
-    # Resolve o autor pelo e‑mail do token (grava em Relatorios_Sprint.id_autor_fk)
+    # Resolve o autor pelo e-mail do token (grava em Relatorios_Sprint.id_autor_fk)
     uploader = repository.get_usuario_por_email(_user_email)
     author_id = uploader.id_usuario if uploader else None
 
@@ -552,7 +552,7 @@ def delete_projeto(
 
 
 # ======================================================================================
-# User‑facing: projetos gerenciados/visíveis e soft delete
+# User-facing: projetos gerenciados/visíveis e soft delete
 # ======================================================================================
 @app.get("/me/projetos/gerenciados", response_model=List[models.ProjectListItem])
 def meus_projetos_gerenciados(_user_email: str = Depends(require_user)):
