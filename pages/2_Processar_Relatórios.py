@@ -7,7 +7,7 @@ Seções:
 - Helpers de API (tipos de projeto e projetos do usuário)
 - Formulário de upload e envio para `/processar-relatorios/`
 - Polling do status da tarefa (`/tasks/status/{task_id}`)
-- Histórico: lista de projetos gerenciados com ação de **Soft Delete**
+- Histórico: lista de projetos gerenciados com ação de Soft Delete
 """
 
 # ======================================================================================
@@ -20,6 +20,31 @@ from pathlib import Path
 from base64 import b64encode
 
 from ui_nav import garantir_sessao_e_permissoes, render_menu_lateral, api_headers, req_get, req_post
+
+# ======================================================================================
+# Funções utilitárias para imagem (robustas ao ambiente do Render)
+# ======================================================================================
+def _load_image_b64(filename: str) -> str | None:
+    """
+    Tenta localizar a imagem em locais comuns:
+    - ./images/<filename> (ao lado da página)
+    - ../pages/images/<filename> (raiz/pages/images)
+    - ./<filename> (fallback raro)
+    Retorna base64 ou None.
+    """
+    here = Path(__file__).resolve().parent
+    candidates = [
+        here / "images" / filename,                # raiz/pages/images (padrão quando está ao lado)
+        Path.cwd() / "pages" / "images" / filename, # raiz/pages/images durante runtime
+        here / filename,                            # fallback
+    ]
+    for p in candidates:
+        if p.exists():
+            try:
+                return b64encode(p.read_bytes()).decode()
+            except Exception:
+                pass
+    return None
 
 # ======================================================================================
 # Configuração da página + CSS utilitário (apenas visual)
@@ -113,14 +138,9 @@ button[kind="secondary"]:active{ transform:scale(0.98)!important; }
 # ======================================================================================
 # Sessão + permissões e navegação lateral
 # ======================================================================================
-# Redireciona para Home se não houver sessão/token. O helper `garantir_sessao_e_permissoes`
-# também retorna o conjunto de permissões do usuário autenticado.
 perms = garantir_sessao_e_permissoes()
-
 if not st.session_state.get("logged_in") or not st.session_state.get("auth_token"):
     st.switch_page("Home.py")
-
-# Sidebar unificada (marcando a página atual)
 render_menu_lateral(perms, current_page="processar")
 
 # ======================================================================================
@@ -131,13 +151,7 @@ st.markdown('<div class="main">', unsafe_allow_html=True)
 # ======================================================================================
 # Helpers de API — Tipos de projeto e projetos do usuário
 # ======================================================================================
-
 def get_lista_tipos_projeto():
-    """Busca tipos de projeto permitidos para **este usuário**.
-    - Usa `/projetos/tipos` (aplica RBAC no backend).
-    - Aceita tanto resposta `{"tipos": [...]}` quanto uma lista direta.
-    - Em 401/403 mostra mensagens amigáveis; em outras falhas, alerta.
-    """
     try:
         r = req_get("/projetos/tipos")
         if r.status_code == 200:
@@ -155,12 +169,7 @@ def get_lista_tipos_projeto():
         st.error("API offline.")
         return []
 
-
 def _load_my_projects():
-    """Carrega projetos **gerenciados** pelo usuário (para ações de Soft Delete).
-    - Usa `/me/projetos/gerenciados` (definido no backend; já respeita lixeira).
-    - Mensagens de erro diferenciadas para 401/403 vs outros erros.
-    """
     try:
         r = req_get("/me/projetos/gerenciados")
         if r.status_code == 200:
@@ -177,14 +186,13 @@ def _load_my_projects():
         return []
 
 # ======================================================================================
-# UI — Upload e seleção de tipo de projeto
+# UI — Título com ícone
 # ======================================================================================
-ICON_PATH = Path(__file__).parent / "images" / "upload.png"
-icon_b64 = b64encode(ICON_PATH.read_bytes()).decode()
-
-st.markdown(f"""
+_icon_b64 = _load_image_b64("upload.png")
+st.markdown(
+    f"""
 <div class="title-row">
-  <img src="data:image/png;base64,{icon_b64}" class="title-icon" alt="Upload icon" />
+  {'<img src="data:image/png;base64,' + _icon_b64 + '" class="title-icon" alt="Upload icon" />' if _icon_b64 else '<span style="font-size:36px;">📤</span>'}
   <h1>Processamento de Novos Relatórios</h1>
 </div>
 <style>
@@ -196,7 +204,9 @@ st.markdown(f"""
 }}
 .title-row h1 {{ margin:0; }}
 </style>
-""", unsafe_allow_html=True)
+""",
+    unsafe_allow_html=True,
+)
 
 # Tipos permitidos (aplicando RBAC do backend)
 tipos_disponiveis = get_lista_tipos_projeto()
@@ -217,19 +227,17 @@ uploaded_files = st.file_uploader(
 # Envio para a API e *polling* de status
 # ======================================================================================
 if uploaded_files and st.button("Processar Relatório", key="btn_processar", type="primary", use_container_width=True):
-    # Monta payload multipart com os arquivos selecionados
     files_to_send = [
         ("files", (f.name, f.getvalue(), f.type or "application/octet-stream"))
         for f in uploaded_files
     ]
     data_payload = {"project_type": tipo_sel}
 
-    # Usa `req_post` para garantir refresh + retry (wrapper do projeto)
     resp = req_post(
         "/processar-relatorios/",
         files=files_to_send,
         data=data_payload,
-        headers=api_headers(),   # mantém headers; multipart é tratado pelo requests
+        headers=api_headers(),
         timeout=60,
     )
 
@@ -238,13 +246,12 @@ if uploaded_files and st.button("Processar Relatório", key="btn_processar", typ
         task_id = task.get("task_id") or task.get("id") or task.get("taskId")
         st.success("Upload enviado. Acompanhe o processamento...")
 
-        # Polling simples de status (até ~90s) — mantém lógica original
         if task_id:
             status_box = st.empty()
             progress = st.empty()
 
-            max_wait = 90      # tempo máximo esperando (segundos)
-            interval = 1.5     # intervalo entre consultas (segundos)
+            max_wait = 90
+            interval = 1.5
             steps = int(max_wait / interval)
 
             with st.spinner("Processando relatório..."):
@@ -278,7 +285,6 @@ if uploaded_files and st.button("Processar Relatório", key="btn_processar", typ
 
                     time.sleep(interval)
                 else:
-                    # saiu pelo timeout sem concluir
                     progress.empty()
                     status_box.warning("O processamento está demorando mais que o esperado. Tente checar novamente em alguns instantes.")
     else:
@@ -314,13 +320,12 @@ else:
             abrir_conf = st.button(
                 "🗑️ Soft Delete",
                 key=f"softdel_{codigo}",
-                type="secondary",  
+                type="secondary",
                 use_container_width=True,
             )
 
             st.markdown('</div>', unsafe_allow_html=True)
 
-            # Estado: abre/fecha o bloco de confirmação
             flag_key = f"ask_soft_{codigo}"
             if flag_key not in st.session_state:
                 st.session_state[flag_key] = False
@@ -330,7 +335,6 @@ else:
             if st.session_state.get(flag_key, False):
                 st.markdown("""
                 <style>
-                /* Neutraliza estilos vermelhos do expander só para a área abaixo */
                 .neutral-actions div.stButton > button,
                 .neutral-actions div.stButton > button[kind="secondary"],
                 .neutral-actions div.stButton > button[data-testid="baseButton-secondary"]{
@@ -357,7 +361,6 @@ else:
                 if motivo_val:
                     st.caption(f"Motivo informado: _{motivo_val}_")
 
-                # Área com botões neutros
                 st.markdown('<div class="neutral-actions">', unsafe_allow_html=True)
                 c1, c2 = st.columns(2)
                 with c1:
@@ -367,7 +370,6 @@ else:
                 st.markdown('</div>', unsafe_allow_html=True)
 
                 if confirmar:
-                    # fecha o aviso inline imediatamente
                     st.session_state[flag_key] = False
                     try:
                         resp = req_post(
@@ -378,13 +380,13 @@ else:
                         )
                         if resp.status_code == 200:
                             st.toast("Projeto enviado para a lixeira.", icon="✅")
-                            time.sleep(1.5)  # dá tempo de ver o toast
+                            time.sleep(1.5)
                             st.rerun()
                         else:
                             msg = resp.json().get("detail") if "application/json" in resp.headers.get("content-type","") else resp.text
                             st.toast("❌ Falha no soft delete.", icon="❌")
                             if msg:
-                                st.caption(msg)  # opcional; pode remover se quiser apenas o toast
+                                st.caption(msg)
                     except Exception as e:
                         st.toast("❌ Erro ao contatar a API.", icon="❌")
                         st.caption(f"{e}")
@@ -392,7 +394,7 @@ else:
                 if cancelar:
                     st.session_state[flag_key] = False
                     st.toast("Ação cancelada.", icon="ℹ️")
-                    time.sleep(1.5)  # espera ~2s e limpa a UI
+                    time.sleep(1.5)
                     st.rerun()
 
 st.markdown('</div>', unsafe_allow_html=True)
