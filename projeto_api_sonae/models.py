@@ -1,10 +1,6 @@
 """
 Modelos de domínio: ORM (SQLAlchemy) + Esquemas (Pydantic).
 
-⚠️ Revisão **apenas** com organização e comentários. **Nomes, tipos e lógica
-permanecem inalterados**. A ideia é facilitar a leitura/entendimento sem
-mudar o comportamento.
-
 Seções:
 - Imports e Base
 - Enums / Domínios
@@ -59,7 +55,7 @@ class Projeto(Base):
     data_atualizacao = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
     # Soft delete / auditoria
-    is_deletado     = Column(Boolean, nullable=False, default=False)
+    is_deletado     = Column(Boolean, nullable=False, default=False)  # Postgres: boolean nativo
     deletado_em     = Column(DateTime, nullable=True)
     deletado_por    = Column(Integer, ForeignKey("usuarios.id_usuario", ondelete="SET NULL"), nullable=True)
     motivo_exclusao = Column(String(255), nullable=True)
@@ -67,7 +63,7 @@ class Projeto(Base):
     # Vinculação opcional ao usuário gerente (FK real)
     id_gerente_fk   = Column(Integer, ForeignKey("usuarios.id_usuario", ondelete="SET NULL"), nullable=True, index=True)
 
-    # Relationships (strings para evitar ordem rígida de declaração)
+    # Relationships
     gerente = relationship(
         "Usuario",
         back_populates="projetos_gerenciados",

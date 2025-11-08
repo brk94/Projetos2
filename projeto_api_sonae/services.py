@@ -37,7 +37,7 @@ import unicodedata
 # --- Imports do SQLAlchemy ---
 from . import models
 from sqlalchemy.orm import Session, joinedload
-from sqlalchemy import func, case, desc, delete
+from sqlalchemy import func, case, desc, delete, true, false  # << adiciona true/false
 
 # ======================================================================================
 # Configuração de Segurança (via variáveis de ambiente)
@@ -56,35 +56,27 @@ pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 class AuthService:
     @staticmethod
     def eh_bcrypt_hash(value: Optional[str]) -> bool:
-        """Retorna True se o valor parece ser um hash bcrypt ($2a/$2b/$2y)."""
         if not isinstance(value, str):
             return False
         return value.startswith("$2a$") or value.startswith("$2b$") or value.startswith("$2y$")
 
     def get_hash_senha(self, plain_password: str) -> str:
-        """Gera hash bcrypt para `plain_password` (salt aleatório via gensalt)."""
         return bcrypt.hashpw(plain_password.encode(), bcrypt.gensalt()).decode()
 
     def verificar_senha(self, plain_password: str, hashed_password: str) -> bool:
-        """Verifica apenas quando `hashed_password` é de fato bcrypt.
-        Em outros formatos (texto puro/legado), retorna False por segurança.
-        """
         if not self.eh_bcrypt_hash(hashed_password):
             return False
         return bcrypt.checkpw(plain_password.encode(), hashed_password.encode())
 
     def verificar_senha_ou_texto_puro(self, plain_password: str, stored_value: str) -> bool:
-        """Compat: aceita hash bcrypt **ou** valor em texto puro (legado)."""
         if self.eh_bcrypt_hash(stored_value):
             return bcrypt.checkpw(plain_password.encode(), stored_value.encode())
         return hmac.compare_digest(plain_password, stored_value)
 
     def precisa_atualizar_senha(self, stored_value: str) -> bool:
-        """Sinaliza necessidade de migração quando não for bcrypt."""
         return not self.eh_bcrypt_hash(stored_value)
 
     def criar_access_token(self, data: dict, expires_delta=None) -> str:
-        """Assina um JWT com `sub` e expiração (default: ACCESS_TOKEN_EXPIRE_MINUTES)."""
         to_encode = data.copy()
         expire = datetime.now(timezone.utc) + (expires_delta or timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES))
         to_encode.update({"exp": expire})
@@ -92,12 +84,10 @@ class AuthService:
     
     @staticmethod
     def criar_refresh_token_texto_puro() -> str:
-        """Gera token opaco (plaintext) para refresh; salvo como **hash** no BD."""
         return secrets.token_urlsafe(32)
 
     @staticmethod
     def refresh_token_expirado(rt: models.RefreshToken) -> bool:
-        """Confere expiração (normalizando timezone). Ausência de expiração = expirado."""
         exp_aware = _converter_para_utc(rt.data_expiracao)
         if exp_aware is None:
             return True
@@ -108,15 +98,9 @@ class AuthService:
 # ======================================================================================
 
 def _utc_agora():
-    """Sempre devolve 'agora' com timezone UTC (aware)."""
     return datetime.now(timezone.utc)
 
-
 def _converter_para_utc(dt: datetime | None) -> datetime | None:
-    """Converte datetime do BD (frequentemente *naive*) para aware/UTC, **sem** alterar o instante.
-    - Se já for aware, apenas normaliza para UTC.
-    - Se vier naive, anexa tz UTC (assumindo que o instante foi gravado como UTC).
-    """
     if dt is None:
         return None
     if dt.tzinfo is None:
@@ -134,25 +118,17 @@ class AIService:
         print("AIService inicializado.")
 
     def _sanitizar_resumo_ptbr(self, s: str) -> str:
-        """Pós-processa a resposta para garantir texto limpo e formatos PT-BR de moeda.
-        - Normaliza Unicode e espaços (inclui NBSP) e colapsa quebras.
-        - Corrige padrões de moeda: sempre "R$ 1.234,56" (com espaço após R$).
-        - Separa letras coladas a números (ex.: "a50" → "a 50").
-        - Pequenos fixes de tokens colados e *escape* de markdown acidental.
-        """
         if not isinstance(s, str):
             return ""
         s = unicodedata.normalize("NFC", s).replace("\u00A0", " ")
         s = re.sub(r"\s+", " ", s).strip()
 
-        # 1) com centavos
         s = re.sub(
             r"R\s*\$?\s*([0-9]{1,3}(?:\.[0-9]{3})*,\s*[0-9]{2})",
             lambda m: "R$ " + m.group(1).replace(" ", ""),
             s,
             flags=re.IGNORECASE,
         )
-        # 2) sem centavos (mantém milhar)
         s = re.sub(
             r"R\s*\$?\s*([0-9]{1,3}(?:\.[0-9]{3})+)(?!,)",
             lambda m: "R$ " + m.group(1),
@@ -163,40 +139,21 @@ class AIService:
         s = re.sub(r"([A-Za-zÁ-ú])(\d)", r"\1 \2", s)
         s = re.sub(r"(\d)([A-Za-zÁ-ú])", r"\1 \2", s)
         s = re.sub(r"(?i)\bdeum\b", "de um", s)
-        s = re.sub(r"([*_~`])", r"\\\1", s)  # escape
+        s = re.sub(r"([*_~`])", r"\\\1", s)
         return s
 
     def gerar_resumo_gemini(self, report_data, milestones, kpis) -> str:
-        """Gera um único parágrafo (máx. 4 frases) de resumo executivo PT-BR.
-        - Regras rígidas de formatação de moeda e saída **texto puro**.
-        - Em falha, faz *fallback* para `report_data.resumo_executivo`.
-        """
         prompt = f"""
         Você é um PMO sênior. Produza um ÚNICO parágrafo (no máximo 4 frases), em português-BR,
         apenas com texto plano.
-
-        REGRAS E FORMATAÇÃO (OBRIGATÓRIAS):
-        - Não use Markdown/HTML: nada de '#', '*', '_', '~', '`', listas, títulos.
-        - Não escreva frases introdutórias como "Claro", "Segue", "Aqui está".
-        - Não quebre números no meio nem insira espaços ou quebras de linha dentro de valores.
-        - Para dinheiro use SEMPRE este formato PT-BR: R$ 1.234.567,89 (com espaço após R$).
-        Exemplos VÁLIDOS:
-            R$ 750.000,00
-            R$ 1.500.000,00
-        Exemplos INVÁLIDOS (NÃO use):
-            R $ 750.000 , 00
-            R$750.000,00
-            R 750.000,00
-        - Foque em: status, riscos/impactos, orçamento executado e próximos passos (se houver).
-
+        REGRAS: sem Markdown/HTML; valores monetários no formato PT-BR "R$ 1.234.567,89".
         DADOS:
         - Projeto: {report_data.nome_projeto}
         - Status: {report_data.status_geral}
         - Sprint/Fase: {report_data.numero_sprint}
         - KPIs: {[k.model_dump() for k in kpis]}
         - Milestones: {[m.model_dump() for m in milestones]}
-
-        Responda APENAS com o parágrafo final, sem rótulos ou cabeçalhos.
+        Responda APENAS com o parágrafo final.
         """.strip()
 
         try:
@@ -213,21 +170,15 @@ class AIService:
 # ======================================================================================
 class DatabaseRepository:
     def __init__(self, session_factory, ai_service: AIService):
-        """`session_factory` cria sessões (scoped) e `ai_service` suporta resumos.
-        Não muda a forma de inicialização nem efeitos colaterais (prints).
-        """
         self.session_factory = session_factory
         self.ai_service = ai_service
         print("DatabaseRepository (ORM) inicializado.")
 
-    # ------------- Utils -------------
     def _get_db(self) -> Session:
-        """Abre uma sessão por chamada; *sempre* fechar em finally quando abrir manualmente."""
         return self.session_factory()
 
     # ------------- Usuários / RBAC -------------
     def usuario_tem_papel(self, email: str, role_name: str) -> bool:
-        """Retorna True se o usuário possui o papel informado (join pelos vínculos)."""
         with self.session_factory() as session:
             q = (
                 session.query(models.Papel)
@@ -256,7 +207,6 @@ class DatabaseRepository:
             db.close()
 
     def get_permissoes_usuario(self, email: str) -> List[str]:
-        """Retorna permissões efetivas (distinct) agregando por papéis do usuário."""
         db: Session = self._get_db()
         try:
             q = (
@@ -273,7 +223,6 @@ class DatabaseRepository:
             db.close()
 
     def get_perfil_usuario(self, email: str) -> dict:
-        """Dados básicos + lista de cargos (nomes de papéis vinculados)."""
         db = self._get_db()
         try:
             u = db.query(models.Usuario).filter(models.Usuario.email == email).first()
@@ -297,15 +246,10 @@ class DatabaseRepository:
     # ------------- Refresh Tokens -------------
     @staticmethod
     def _hash_refresh_token(plain_token: str) -> str:
-        """Hash SHA‑256 do refresh token **com pepper** (REFRESH_TOKEN_PEPPER).
-        Armazena apenas o hash no BD para busca/rotação/revogação.
-        """
         pepper = os.getenv("REFRESH_TOKEN_PEPPER", "")
         return hashlib.sha256((pepper + plain_token).encode("utf-8")).hexdigest()
 
-    # === CREATE ===
     def criar_refresh_token(self, db: Session, user_id: int) -> str:
-        """Cria refresh token (plaintext devolvido ao cliente; hash no BD)."""
         plain_token = AuthService.criar_refresh_token_texto_puro()
         token_hash = self._hash_refresh_token(plain_token)
         expires_at = datetime.now(timezone.utc) + timedelta(days=REFRESH_TOKEN_EXPIRE_DAYS)
@@ -318,9 +262,7 @@ class DatabaseRepository:
         db.commit()
         return plain_token
 
-    # === READ ===
     def get_refresh_token(self, db: Session, plain_token: str) -> Optional[models.RefreshToken]:
-        """Busca refresh token por **hash** e valida expiração >= agora (UTC)."""
         token_hash = self._hash_refresh_token(plain_token)
         now = datetime.now(timezone.utc)
         return (
@@ -339,9 +281,7 @@ class DatabaseRepository:
         user = db.query(models.Usuario).filter(models.Usuario.id_usuario == rt.id_usuario_fk).first()
         return user.email if user else None
 
-    # === ROTATE ===
     def rotate_refresh_token(self, db: Session, old_plain_token: str, new_plain_token: str) -> bool:
-        """Troca o hash armazenado (rotate) e renova expiração (idempotente por busca)."""
         rt = self.get_refresh_token(db, old_plain_token)
         if not rt:
             return False
@@ -354,9 +294,7 @@ class DatabaseRepository:
             db.rollback()
             return False
 
-    # === REVOKE ===
     def revogar_refresh_token_para_texto_puro(self, db: Session, plain_token: str) -> int:
-        """Revoga um refresh token específico (busca por plaintext → hash interno)."""
         rt = self.get_refresh_token(db, plain_token)
         if not rt:
             return 0
@@ -380,11 +318,6 @@ class DatabaseRepository:
 
     # ------------- Relatórios / Dashboards -------------
     def salvar_relatorio_processado(self, report: models.ParsedReport, author_id: int | None = None) -> int:
-        """Persiste Projeto (upsert parcial), Relatório, Milestones e KPIs.
-        - Se Gemini está configurado, sobrescreve `resumo_executivo` com resumo IA.
-        - Resolve FK do gerente por nome (apenas se existir e tiver papel compatível).
-        - Garante acesso do gerente ao projeto (papel conforme `_papel_acesso_por_usuario`).
-        """
         db: Session = self._get_db()
         try:
             if self.ai_service.gemini_model:
@@ -392,10 +325,8 @@ class DatabaseRepository:
                 resumo_ia = self.ai_service.gerar_resumo_gemini(report, report.milestones, report.kpis)
                 report.resumo_executivo = resumo_ia
 
-            # Procura a FK do gerente pelo nome vindo no relatório
             gerente_fk = self._buscar_fk_gerente_por_nome(db, report.gerente_projeto)
 
-            # Garante acesso do gerente com papel vindo do banco
             if gerente_fk is not None:
                 papel_acesso_gerente = self._papel_acesso_por_usuario(db, gerente_fk)
                 self._grant_acesso_projeto(
@@ -405,7 +336,6 @@ class DatabaseRepository:
                     papel=papel_acesso_gerente,
                 )
 
-            # Orçamento total a partir dos KPIs
             orcamento_total_kpi = next((kpi for kpi in report.kpis if kpi.nome_kpi == "Orçamento Total"), None)
 
             projeto_orm = db.query(models.Projeto).get(report.codigo_projeto)
@@ -413,7 +343,7 @@ class DatabaseRepository:
                 projeto_orm.nome_projeto = report.nome_projeto
                 projeto_orm.gerente_projeto = report.gerente_projeto
                 if gerente_fk is not None:
-                    projeto_orm.id_gerente_fk = gerente_fk  # << preencher/atualizar FK
+                    projeto_orm.id_gerente_fk = gerente_fk
                 if orcamento_total_kpi and orcamento_total_kpi.valor_numerico_kpi is not None:
                     projeto_orm.orcamento_total = orcamento_total_kpi.valor_numerico_kpi
             else:
@@ -432,7 +362,6 @@ class DatabaseRepository:
                 )
                 db.add(projeto_orm)
 
-            # Cria o relatório
             relatorio_orm = models.RelatorioSprint(
                 numero_sprint=report.numero_sprint,
                 status_geral=report.status_geral,
@@ -463,9 +392,6 @@ class DatabaseRepository:
             db.close()
 
     def _papel_acesso_por_usuario(self, db, id_usuario: int) -> str:
-        """Dado um usuário, retorna o **papel mais prioritário** entre seus vínculos.
-        Ordem (alta→baixa): Administrador > Diretor > Gestor de Projetos > Analista > Visualizador
-        """
         rows = (
             db.query(models.Papel.nome)
             .join(models.UsuarioPapel, models.UsuarioPapel.id_papel_fk == models.Papel.id_papel)
@@ -487,7 +413,6 @@ class DatabaseRepository:
         return "Visualizador"
 
     def _grant_acesso_projeto(self, db, codigo_projeto: str, id_usuario: int, papel: str) -> None:
-        """Garante (idempotente) um vínculo de acesso ao projeto com o papel informado."""
         vinc = (
             db.query(models.ProjetoUsuarioAcesso)
             .filter(
@@ -508,9 +433,6 @@ class DatabaseRepository:
         ))
 
     def _buscar_fk_gerente_por_nome(self, db: Session, nome_gerente: str | None) -> int | None:
-        """Resolve a FK do gerente *apenas* se houver um usuário com papel "Gestor de Projetos".
-        Caso não encontre, retorna `None` (o nome string continua salvo no Projeto).
-        """
         if not nome_gerente or not nome_gerente.strip():
             return None
 
@@ -526,13 +448,8 @@ class DatabaseRepository:
         return row.id_usuario if row else None
 
     def get_estatisticas_dashboard(self) -> Optional[models.DashboardStats]:
-        """Agrega métricas do *último relatório de cada projeto* ativo.
-        - Conta projetos em Dia/Risco/Atrasado.
-        - Soma investimento total executado (KPI "Custo Realizado").
-        """
         db: Session = self._get_db()
         try:
-            # Subconsulta: última sprint por projeto
             subquery = (
                 db.query(
                     models.RelatorioSprint.codigo_projeto_fk,
@@ -542,7 +459,6 @@ class DatabaseRepository:
                 .subquery()
             )
 
-            # Base: último relatório por projeto + join com Projetos (apenas ativos)
             base = (
                 db.query(models.RelatorioSprint)
                 .join(
@@ -554,10 +470,9 @@ class DatabaseRepository:
                     models.Projeto,
                     models.Projeto.codigo_projeto == models.RelatorioSprint.codigo_projeto_fk,
                 )
-                .filter(models.Projeto.is_deletado == 0)   # <<--- só ativos
+                .filter(models.Projeto.is_deletado.is_(False))   # 👈 Postgres boolean
             )
 
-            # Agregados do quadro-resumo
             query = db.query(
                 func.count().label("total_projetos"),
                 func.sum(
@@ -573,7 +488,6 @@ class DatabaseRepository:
 
             resultado = query.one()
 
-            # Investimento total (somente projetos ativos)
             investimento_total = (
                 db.query(func.sum(models.RelatorioKPI.valor_numerico_kpi))
                 .join(
@@ -586,7 +500,7 @@ class DatabaseRepository:
                 )
                 .filter(
                     models.RelatorioKPI.nome_kpi == "Custo Realizado",
-                    models.Projeto.is_deletado == 0,  # <<--- só ativos
+                    models.Projeto.is_deletado.is_(False),  # 👈
                 )
                 .scalar()
                 or 0.0
@@ -599,11 +513,10 @@ class DatabaseRepository:
             db.close()
 
     def get_lista_projetos(self) -> List[models.ProjectListItem]:
-        """Lista de projetos **ativos** (nome/código/área) ordenada alfabeticamente."""
         db: Session = self._get_db()
         try:
             base = db.query(models.Projeto)
-            base = self._somente_ativos(base)  # <<--- filtro atual
+            base = self._somente_ativos(base)  # 👈 já filtra por is_(False)
             projetos_orm = base.order_by(models.Projeto.nome_projeto).all()
 
             def _area_as_str(p):
@@ -638,7 +551,6 @@ class DatabaseRepository:
             db.close()
 
     def get_detalhe_do_relatorio(self, id_relatorio: int) -> Optional[models.ReportDetailResponse]:
-        """Carrega relatório + joins (projeto, milestones, kpis) e medeia p/ DTOs Pydantic."""
         db: Session = self._get_db()
         try:
             relatorio_atual = (
@@ -674,7 +586,6 @@ class DatabaseRepository:
             db.close()
 
     def get_historico_kpi(self, codigo_projeto: str, nome_kpi: str) -> List[models.FinancialHistoryItem]:
-        """Série temporal do KPI por sprint, com orçamento total do projeto para contexto."""
         db: Session = self._get_db()
         try:
             projeto = (
@@ -711,10 +622,6 @@ class DatabaseRepository:
     # --- Solicitações de Acesso (CRUD + aprovação) ---
     def criar_solicitacao_acesso(
         self, * , nome: str, email: str, senha: str, setor: str, justificativa: str, cargo: str,) -> None:
-        """Registra solicitação 'aguardando' (com `senha_hash`) se não houver conflito.
-        - Valida cargo permitido e ausência de usuário/pendência.
-        - Mantém todos os campos e validações do original.
-        """
         db: Session = self._get_db()
         try:
             email_norm = (email or "").strip().lower()
@@ -797,12 +704,11 @@ class DatabaseRepository:
             db.close()
 
     def decidir_solicitacao(self, id_solic: int, admin_id: int, decisao: str, motivo: Optional[str] = None):
-        """Fluxo de aprovação/rejeição — mantém todas as validações e *side-effects* originais."""
         db: Session = self._get_db()
         try:
             sol = db.get(models.UsuarioSolicitacaoAcesso, id_solic)
             if not sol:
-                raise RuntimeError("Solicitação não encontrada.")
+                raise RuntimeError("Solicitação não encontrado.")
             if sol.status != "aguardando":
                 raise RuntimeError("Solicitação já foi decidida.")
 
@@ -818,7 +724,6 @@ class DatabaseRepository:
                 db.commit()
                 return
 
-            # Aprovação
             cargo = (sol.cargo or "").strip()
             papel = db.query(models.Papel).filter(models.Papel.nome == cargo).first()
             if not papel:
@@ -837,7 +742,7 @@ class DatabaseRepository:
                 setor=(sol.setor or None)
             )
             db.add(novo)
-            db.flush()  # obtém novo.id_usuario
+            db.flush()
 
             ja_tem = (
                 db.query(models.UsuarioPapel)
@@ -892,10 +797,6 @@ class DatabaseRepository:
             db.close()
 
     def listar_usuarios(self, q: str | None = None) -> list[dict]:
-        """Lista usuários + **um** cargo prioritário (colapsado) por usuário.
-        - Usa `CARGO_ORDER` para priorizar: Admin > Gestor > Analista > Diretor > Visualizador.
-        - Ordena por `id_usuario` e, por usuário, cargo de maior prioridade.
-        """
         db: Session = self._get_db()
         try:
             CARGO_ORDER = case(
@@ -951,7 +852,6 @@ class DatabaseRepository:
             db.close()
 
     def _garantir_acesso_gerente(db, codigo_projeto: str, id_gerente: int):
-        """(Compat) Cria vínculo de acesso de 'Gestor de Projetos' se não existir."""
         exists = (
             db.query(models.ProjetoUsuarioAcesso.id_acesso)
             .filter(models.ProjetoUsuarioAcesso.codigo_projeto_fk == codigo_projeto,
@@ -967,17 +867,15 @@ class DatabaseRepository:
 
     # -------- SOFT DELETE  --------
     def _somente_ativos(self, query):
-        """Filtra para considerar apenas projetos com is_deletado = 0."""
-        return query.filter(models.Projeto.is_deletado == 0)
+        """Filtra apenas projetos com is_deletado = FALSE (Postgres boolean)."""
+        return query.filter(models.Projeto.is_deletado.is_(False))
 
     def _pode_gerir_projeto(self, *, projeto, user_id: int, is_admin: bool) -> bool:
-        """Regra: admin sempre pode; senão, precisa ser o gerente (FK)."""
         if is_admin:
             return True
         return (projeto.id_gerente_fk is not None) and (projeto.id_gerente_fk == user_id)
 
     def can_soft_delete_projeto(self, *, email: str, codigo_projeto: str) -> bool:
-        """Pode enviar à lixeira se: Admin **ou** Gerente do projeto (via FK)."""
         db = self._get_db()
         try:
             user = db.query(models.Usuario).filter(models.Usuario.email == email).first()
@@ -995,8 +893,7 @@ class DatabaseRepository:
             db.close()
 
     def soft_delete_projeto(self, *, codigo_projeto: str, admin_id: int | None = None, motivo: str | None = None) -> bool:
-        """Marca `is_deletado=1` sem apagar filhos (idempotente se já estiver na lixeira)."""
-        db = self._get_db()
+        db: Session = self._get_db()
         try:
             proj = (
                 db.query(models.Projeto)
@@ -1009,7 +906,7 @@ class DatabaseRepository:
             if bool(proj.is_deletado):
                 return True
 
-            proj.is_deletado = 1
+            proj.is_deletado = True            # 👈 boolean
             proj.deletado_em = datetime.utcnow()
             proj.deletado_por = admin_id
             proj.motivo_exclusao = (motivo or None)
@@ -1022,17 +919,16 @@ class DatabaseRepository:
             db.close()
 
     def restaurar_projeto(self, *, codigo_projeto: str, user_id: int, is_admin: bool = False) -> bool:
-        """Restaura projeto da lixeira. Admin sempre pode; senão, apenas o gerente (FK)."""
         db: Session = self._get_db()
         try:
             prj = db.query(models.Projeto).get(codigo_projeto)
-            if not prj or prj.is_deletado == 0:
+            if not prj or prj.is_deletado is False:
                 return False
 
             if not self._pode_gerir_projeto(projeto=prj, user_id=user_id, is_admin=is_admin):
                 raise RuntimeError("Sem permissão para restaurar este projeto.")
 
-            prj.is_deletado = 0
+            prj.is_deletado = False            # 👈 boolean
             prj.deletado_em = None
             prj.deletado_por = None
             prj.motivo_exclusao = None
@@ -1045,7 +941,6 @@ class DatabaseRepository:
             db.close()
 
     def remover_projeto_definitivo(self, codigo_projeto: str) -> bool:
-        """Hard delete (DELETE FROM Projetos …). Cascatas cuidam das filhas."""
         db: Session = self._get_db()
         try:
             proj = db.query(models.Projeto).get(codigo_projeto)
@@ -1061,7 +956,6 @@ class DatabaseRepository:
             db.close()
 
     def listar_projetos_deletados(self) -> list[dict]:
-        """Tela 'Gerenciar Exclusões': lista projetos com `is_deletado=1` (join com autor)."""
         db: Session = self._get_db()
         try:
             rows = (
@@ -1074,7 +968,7 @@ class DatabaseRepository:
                     models.Usuario.nome.label("deletado_por_nome"),
                 )
                 .outerjoin(models.Usuario, models.Usuario.id_usuario == models.Projeto.deletado_por)
-                .filter(models.Projeto.is_deletado == 1)
+                .filter(models.Projeto.is_deletado.is_(True))   # 👈
                 .order_by(models.Projeto.deletado_em.desc())
                 .all()
             )
@@ -1092,7 +986,6 @@ class DatabaseRepository:
             db.close()
 
     def listar_projetos_visiveis(self, *, email: str) -> list[dict]:
-        """Mapeia todos os projetos que o usuário **pode ver** (Admin, Gerente FK, Acesso, Autor)."""
         db = self._get_db()
         try:
             u = db.query(models.Usuario).filter(models.Usuario.email == email).first()
@@ -1105,27 +998,27 @@ class DatabaseRepository:
 
             if is_admin:
                 rows = (db.query(models.Projeto.codigo_projeto, models.Projeto.nome_projeto)
-                        .filter(models.Projeto.is_deletado == 0)
+                        .filter(models.Projeto.is_deletado.is_(False))   # 👈
                         .order_by(models.Projeto.nome_projeto.asc())
                         .all())
                 for r in rows: projetos_map[r.codigo_projeto] = r.nome_projeto
 
             rows_fk = (db.query(models.Projeto.codigo_projeto, models.Projeto.nome_projeto)
-                        .filter(models.Projeto.is_deletado == 0,
+                        .filter(models.Projeto.is_deletado.is_(False),
                                 models.Projeto.id_gerente_fk == uid).all())
             for r in rows_fk: projetos_map[r.codigo_projeto] = r.nome_projeto
 
             rows_acc = (db.query(models.Projeto.codigo_projeto, models.Projeto.nome_projeto)
                         .join(models.ProjetoUsuarioAcesso,
                                 models.ProjetoUsuarioAcesso.codigo_projeto_fk == models.Projeto.codigo_projeto)
-                        .filter(models.Projeto.is_deletado == 0,
+                        .filter(models.Projeto.is_deletado.is_(False),
                                 models.ProjetoUsuarioAcesso.id_usuario_fk == uid).all())
             for r in rows_acc: projetos_map[r.codigo_projeto] = r.nome_projeto
 
             rows_autor = (db.query(models.Projeto.codigo_projeto, models.Projeto.nome_projeto)
                             .join(models.RelatorioSprint,
                                 models.RelatorioSprint.codigo_projeto_fk == models.Projeto.codigo_projeto)
-                            .filter(models.Projeto.is_deletado == 0,
+                            .filter(models.Projeto.is_deletado.is_(False),
                                     models.RelatorioSprint.id_autor_fk == uid).all())
             for r in rows_autor: projetos_map[r.codigo_projeto] = r.nome_projeto
 
@@ -1154,7 +1047,6 @@ class DatabaseRepository:
             db.close()
 
     def permissao_deletar_projeto(self, *, email: str, codigo_projeto: str) -> bool:
-        """Admin sempre pode. Gestor pode se for gerente (comparação por **nome** string)."""
         if self.eh_admin(email):
             return True
         if not self.eh_gestor(email):
@@ -1168,13 +1060,9 @@ class DatabaseRepository:
         if not proj:
             return False
 
-        # Comparação por NOME (modelo guarda string em `gerente_projeto`)
         return self._norm(proj.gerente_projeto) == self._norm(user.nome)
 
     def listar_projetos_gerenciados(self, *, email: str) -> list[dict]:
-        """Projetos onde o usuário é gerente (FK), admin, autor, ou (fallback) por nome único.
-        Mantém a mesma ordem e deduplicação por mapa.
-        """
         db = self._get_db()
         try:
             u = (
@@ -1201,7 +1089,7 @@ class DatabaseRepository:
             if is_admin:
                 rows_all = (
                     db.query(models.Projeto.codigo_projeto, models.Projeto.nome_projeto)
-                    .filter(models.Projeto.is_deletado == 0)
+                    .filter(models.Projeto.is_deletado.is_(False))  # 👈
                     .order_by(models.Projeto.nome_projeto.asc())
                     .all()
                 )
@@ -1210,7 +1098,7 @@ class DatabaseRepository:
 
             rows_fk = (
                 db.query(models.Projeto.codigo_projeto, models.Projeto.nome_projeto)
-                .filter(models.Projeto.is_deletado == 0)
+                .filter(models.Projeto.is_deletado.is_(False))  # 👈
                 .filter(models.Projeto.id_gerente_fk == uid)
                 .order_by(models.Projeto.nome_projeto.asc())
                 .all()
@@ -1221,7 +1109,7 @@ class DatabaseRepository:
             rows_author = (
                 db.query(models.Projeto.codigo_projeto, models.Projeto.nome_projeto)
                 .join(models.RelatorioSprint, models.RelatorioSprint.codigo_projeto_fk == models.Projeto.codigo_projeto)
-                .filter(models.Projeto.is_deletado == 0)
+                .filter(models.Projeto.is_deletado.is_(False))  # 👈
                 .filter(models.RelatorioSprint.id_autor_fk == uid)
                 .group_by(models.Projeto.codigo_projeto, models.Projeto.nome_projeto)
                 .order_by(models.Projeto.nome_projeto.asc())
@@ -1230,18 +1118,17 @@ class DatabaseRepository:
             for r in rows_author:
                 projetos_map[r.codigo_projeto] = r.nome_projeto
 
-            # Fallback temporário por nome (compatibilidade) — apenas se nada foi encontrado
             if not projetos_map:
-                from sqlalchemy import func
+                from sqlalchemy import func as _func
                 qtd = (
-                    db.query(func.count(models.Usuario.id_usuario))
+                    db.query(_func.count(models.Usuario.id_usuario))
                     .filter(models.Usuario.nome == nome)
                     .scalar()
                 )
                 if qtd == 1:
                     rows_name = (
                         db.query(models.Projeto.codigo_projeto, models.Projeto.nome_projeto)
-                        .filter(models.Projeto.is_deletado == 0)
+                        .filter(models.Projeto.is_deletado.is_(False))  # 👈
                         .filter(models.Projeto.id_gerente_fk.is_(None))
                         .filter(models.Projeto.gerente_projeto == nome)
                         .order_by(models.Projeto.nome_projeto.asc())
@@ -1258,8 +1145,7 @@ class DatabaseRepository:
             db.close()
 
     def listar_acessos_por_projeto(self, *, codigo_projeto: str) -> list[dict]:
-        """Lista vínculos de acesso e dados básicos do usuário (join) ordenados por nome."""
-        db = self._get_db()
+        db: Session = self._get_db()
         try:
             rows = (
                 db.query(
@@ -1290,8 +1176,7 @@ class DatabaseRepository:
             db.close()
 
     def listar_acessos_por_usuario(self, *, id_usuario: int) -> list[dict]:
-        """Lista códigos de projeto e papéis de acesso associados a um usuário."""
-        db = self._get_db()
+        db: Session = self._get_db()
         try:
             rows = (
                 db.query(
@@ -1309,8 +1194,7 @@ class DatabaseRepository:
             db.close()
 
     def garantir_acesso_projeto(self, *, codigo_projeto: str, id_usuario: int, papel: str | None = None) -> dict:
-        """Idempotente: garante um vínculo com `papel_final` (param ou deduzido por prioridade)."""
-        db = self._get_db()
+        db: Session = self._get_db()
         try:
             papel_final = (papel or self._papel_acesso_por_usuario(db, id_usuario) or "Visualizador")
             vinc = (
@@ -1338,8 +1222,7 @@ class DatabaseRepository:
             db.close()
 
     def revogar_acesso_projeto(self, *, codigo_projeto: str, id_usuario: int) -> dict:
-        """Remove vínculo de acesso ao projeto (se existir)."""
-        db = self._get_db()
+        db: Session = self._get_db()
         try:
             db.query(models.ProjetoUsuarioAcesso).filter(
                 models.ProjetoUsuarioAcesso.codigo_projeto_fk == codigo_projeto,
