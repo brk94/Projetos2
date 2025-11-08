@@ -1,0 +1,202 @@
+-- Tabela: escopos
+CREATE TABLE escopos (
+  id_escopo SERIAL PRIMARY KEY,
+  tipo VARCHAR(50) NOT NULL UNIQUE,
+  descricao TEXT
+);
+
+-- Tabela: permissoes
+CREATE TABLE permissoes (
+  id_permissao SERIAL PRIMARY KEY,
+  nome_permissao VARCHAR(255) NOT NULL UNIQUE,
+  descricao TEXT
+);
+
+-- Tabela: usuarios
+CREATE TABLE usuarios (
+  id_usuario SERIAL PRIMARY KEY,
+  nome VARCHAR(255) NOT NULL,
+  email VARCHAR(255) NOT NULL UNIQUE,
+  senha_hash VARCHAR(255) NOT NULL,
+  data_criacao TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  data_atualizacao TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  data_exclusao TIMESTAMP NULL,
+  setor VARCHAR(32) CHECK (setor IN ('TI', 'Retalho', 'RH', 'Marketing'))
+);
+
+-- Tabela: projetos
+CREATE TABLE projetos (
+  codigo_projeto VARCHAR(50) PRIMARY KEY,
+  nome_projeto VARCHAR(255) NOT NULL,
+  gerente_projeto VARCHAR(255),
+  orcamento_total FLOAT DEFAULT 0,
+  area_negocio VARCHAR(32) NOT NULL,
+  data_criacao TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  data_atualizacao TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  is_deletado BOOLEAN NOT NULL DEFAULT FALSE,
+  deletado_em TIMESTAMP NULL,
+  deletado_por INT NULL,
+  motivo_exclusao VARCHAR(255),
+  id_gerente_fk INT NULL,
+  CONSTRAINT fk_projeto_gerente FOREIGN KEY (id_gerente_fk)
+    REFERENCES usuarios (id_usuario)
+    ON DELETE SET NULL
+    ON UPDATE CASCADE
+);
+
+CREATE UNIQUE INDEX ux_projeto_gerente ON projetos (codigo_projeto, id_gerente_fk);
+CREATE INDEX idx_projetos_isdel ON projetos(is_deletado);
+CREATE INDEX idx_projetos_id_gerente_fk ON projetos(id_gerente_fk);
+
+-- Tabela: relatorios_sprint
+CREATE TABLE relatorios_sprint (
+  id_relatorio SERIAL PRIMARY KEY,
+  numero_sprint INT NOT NULL,
+  data_relatorio DATE DEFAULT CURRENT_DATE,
+  status_geral VARCHAR(50),
+  resumo_executivo TEXT,
+  riscos_e_impedimentos TEXT,
+  proximos_passos TEXT,
+  codigo_projeto_fk VARCHAR(50) NOT NULL,
+  id_autor_fk INT NULL,
+  data_criacao TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  data_atualizacao TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  story_points_planejados INT,
+  story_points_entregues INT,
+  CONSTRAINT fk_relatorio_projeto FOREIGN KEY (codigo_projeto_fk)
+    REFERENCES projetos (codigo_projeto)
+    ON DELETE CASCADE
+    ON UPDATE CASCADE,
+  CONSTRAINT fk_relatorio_usuario FOREIGN KEY (id_autor_fk)
+    REFERENCES usuarios (id_usuario)
+    ON DELETE SET NULL
+    ON UPDATE CASCADE
+);
+
+-- Tabela: milestones_historico
+CREATE TABLE milestones_historico (
+  id_historico_marco SERIAL PRIMARY KEY,
+  descricao TEXT NOT NULL,
+  status VARCHAR(100),
+  data_planejada DATE,
+  data_real_ou_revisada DATE,
+  id_relatorio_fk INT NOT NULL,
+  data_criacao TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  CONSTRAINT fk_milestone_relatorio FOREIGN KEY (id_relatorio_fk)
+    REFERENCES relatorios_sprint (id_relatorio)
+    ON DELETE CASCADE
+    ON UPDATE CASCADE
+);
+
+-- Tabela: relatorios_kpis
+CREATE TABLE relatorios_kpis (
+  id_kpi SERIAL PRIMARY KEY,
+  nome_kpi VARCHAR(255) NOT NULL,
+  valor_numerico_kpi FLOAT,
+  valor_texto_kpi VARCHAR(500),
+  categoria_kpi VARCHAR(100) DEFAULT 'Geral',
+  id_relatorio_fk INT NOT NULL,
+  data_criacao TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  CONSTRAINT fk_kpi_relatorio FOREIGN KEY (id_relatorio_fk)
+    REFERENCES relatorios_sprint (id_relatorio)
+    ON DELETE CASCADE
+    ON UPDATE CASCADE
+);
+
+-- Tabela: escopos/papeis/permissoes
+CREATE TABLE papeis (
+  id_papel SERIAL PRIMARY KEY,
+  nome VARCHAR(100) NOT NULL UNIQUE,
+  id_escopo_fk INT NOT NULL,
+  data_criacao TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  data_atualizacao TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  CONSTRAINT fk_papeis_escopos FOREIGN KEY (id_escopo_fk)
+    REFERENCES escopos (id_escopo)
+    ON DELETE RESTRICT
+    ON UPDATE CASCADE
+);
+
+CREATE TABLE papel_permissoes (
+  id_papel_fk INT NOT NULL,
+  id_permissao_fk INT NOT NULL,
+  data_atribuicao TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (id_papel_fk, id_permissao_fk),
+  CONSTRAINT fk_papel_permissao_papel FOREIGN KEY (id_papel_fk)
+    REFERENCES papeis (id_papel)
+    ON DELETE CASCADE
+    ON UPDATE CASCADE,
+  CONSTRAINT fk_papel_permissao_perm FOREIGN KEY (id_permissao_fk)
+    REFERENCES permissoes (id_permissao)
+    ON DELETE CASCADE
+    ON UPDATE CASCADE
+);
+
+-- Tabela: usuario_papeis
+CREATE TABLE usuario_papeis (
+  id_usuario_fk INT NOT NULL,
+  id_papel_fk INT NOT NULL,
+  data_atribuicao TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (id_usuario_fk, id_papel_fk),
+  CONSTRAINT fk_usuario_papeis_usuario FOREIGN KEY (id_usuario_fk)
+    REFERENCES usuarios (id_usuario)
+    ON DELETE CASCADE
+    ON UPDATE CASCADE,
+  CONSTRAINT fk_usuario_papeis_papel FOREIGN KEY (id_papel_fk)
+    REFERENCES papeis (id_papel)
+    ON DELETE CASCADE
+    ON UPDATE CASCADE
+);
+
+-- Tabela: refresh_tokens
+CREATE TABLE refresh_tokens (
+  id_token SERIAL PRIMARY KEY,
+  id_usuario_fk INT NOT NULL,
+  token_hash VARCHAR(255) NOT NULL,
+  data_expiracao TIMESTAMP NOT NULL,
+  data_criacao TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  CONSTRAINT fk_refresh_usuario FOREIGN KEY (id_usuario_fk)
+    REFERENCES usuarios (id_usuario)
+    ON DELETE CASCADE
+    ON UPDATE CASCADE
+);
+
+-- Tabela: usuarios_solicitacoes_acesso
+CREATE TABLE usuarios_solicitacoes_acesso (
+  id_solicitacao BIGSERIAL PRIMARY KEY,
+  nome VARCHAR(255) NOT NULL,
+  email VARCHAR(255) NOT NULL,
+  senha_hash VARCHAR(255) NOT NULL,
+  setor VARCHAR(255) NOT NULL,
+  cargo VARCHAR(64) NOT NULL,
+  justificativa VARCHAR(512) NOT NULL,
+  status VARCHAR(20) NOT NULL DEFAULT 'aguardando' CHECK (status IN ('aguardando','aprovado','rejeitado','expirado')),
+  decidido_por BIGINT NULL,
+  decidido_em TIMESTAMP NULL,
+  motivo_decisao VARCHAR(512),
+  criado_em TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  expira_em TIMESTAMP NULL,
+  aguardando BOOLEAN GENERATED ALWAYS AS (status = 'aguardando') STORED,
+  UNIQUE (email, aguardando)
+);
+
+CREATE INDEX idx_status_email ON usuarios_solicitacoes_acesso (status, email);
+CREATE INDEX idx_criado_em ON usuarios_solicitacoes_acesso (criado_em);
+
+-- Tabela: projetos_usuarios_acesso
+CREATE TABLE projetos_usuarios_acesso (
+  id_acesso SERIAL PRIMARY KEY,
+  codigo_projeto_fk VARCHAR(50) NOT NULL,
+  id_usuario_fk INT NOT NULL,
+  papel_acesso VARCHAR(32) NOT NULL DEFAULT 'Visualizador',
+  criado_em TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE (codigo_projeto_fk, id_usuario_fk),
+  CONSTRAINT fk_pua_proj FOREIGN KEY (codigo_projeto_fk)
+    REFERENCES projetos (codigo_projeto)
+    ON DELETE CASCADE,
+  CONSTRAINT fk_pua_user FOREIGN KEY (id_usuario_fk)
+    REFERENCES usuarios (id_usuario)
+    ON DELETE CASCADE
+);
+
+CREATE INDEX idx_pua_proj ON projetos_usuarios_acesso (codigo_projeto_fk);
+CREATE INDEX idx_pua_user ON projetos_usuarios_acesso (id_usuario_fk);

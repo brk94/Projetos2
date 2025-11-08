@@ -1,0 +1,111 @@
+-- =====================
+-- 1) ESCOPO (Escopos)
+-- =====================
+INSERT INTO escopos (id_escopo, tipo, descricao) VALUES
+  (1, 'global', 'Escopo global'),
+  (2, 'restrito', 'Escopo restrito a funcionalidades limitadas');
+
+-- ==========================
+-- 2) PERMISSÕES (Permissoes)
+-- ==========================
+INSERT INTO permissoes (id_permissao, nome_permissao, descricao) VALUES
+  (1,  'view_pagina_home',                 'Acessar a página inicial/executiva.'),
+  (2,  'view_pagina_dashboards',           'Acessar a página principal dos dashboards.'),
+  (3,  'view_pagina_processar_relatorios', 'Acessar a página de upload de relatórios.'),
+  (4,  'view_dashboard_ti',                'Ver dados do dashboard de TI.'),
+  (5,  'view_dashboard_retalho',           'Ver dados do dashboard de Retalho.'),
+  (6,  'view_dashboard_rh',                'Ver dados do dashboard de RH.'),
+  (7,  'view_dashboard_marketing',         'Ver dados do dashboard de Marketing.'),
+  (8,  'realizar_upload_relatorio',        'Permissão genérica para fazer upload de qualquer relatório.'),
+  (9,  'excluir_relatorio',                'Mover um relatório para a lixeira (soft delete).'),
+  (10, 'gerenciar_usuarios',               'Criar, editar e excluir usuários.'),
+  (11, 'gerenciar_papeis',                 'Criar e editar papéis e suas permissões.');
+
+-- =======================
+-- 3) PAPÉIS (Papeis)
+-- =======================
+INSERT INTO papeis (id_papel, nome, id_escopo_fk) VALUES
+  (1, 'Administrador',      1),
+  (2, 'Diretor',            1),
+  (3, 'Gestor de Projetos', 1),
+  (4, 'Analista',           2),
+  (5, 'Visualizador',       2);
+
+-- ===============================
+-- 4) PAPEL x PERMISSÃO (junção)
+-- ===============================
+
+-- Admin: tudo relevante
+INSERT INTO papel_permissoes (id_papel_fk, id_permissao_fk)
+SELECT 1, id_permissao FROM permissoes;
+
+-- Diretor: ver home e dashboards (sem upload)
+INSERT INTO papel_permissoes (id_papel_fk, id_permissao_fk)
+SELECT 2, id_permissao FROM permissoes
+WHERE nome_permissao IN (
+  'view_pagina_home',
+  'view_pagina_dashboards',
+  'view_dashboard_ti',
+  'view_dashboard_retalho',
+  'view_dashboard_rh',
+  'view_dashboard_marketing'
+);
+
+-- Gestor: ver home e dashboards + (opcional) excluir_relatorio
+INSERT INTO papel_permissoes (id_papel_fk, id_permissao_fk)
+SELECT 3, id_permissao FROM permissoes
+WHERE nome_permissao IN (
+  'view_pagina_home',
+  'view_pagina_dashboards',
+  'view_dashboard_ti',
+  'view_dashboard_retalho',
+  'view_dashboard_rh',
+  'view_dashboard_marketing',
+  'excluir_relatorio'
+);
+
+-- Analista: apenas upload e página de upload (nada de dashboards)
+INSERT INTO papel_permissoes (id_papel_fk, id_permissao_fk)
+SELECT 4, id_permissao FROM permissoes
+WHERE nome_permissao IN (
+  'view_pagina_processar_relatorios',
+  'realizar_upload_relatorio'
+);
+
+-- Visualizador: ver home e dashboards (sem upload)
+INSERT INTO papel_permissoes (id_papel_fk, id_permissao_fk)
+SELECT 5, id_permissao FROM permissoes
+WHERE nome_permissao IN (
+  'view_pagina_home',
+  'view_pagina_dashboards',
+  'view_dashboard_ti',
+  'view_dashboard_retalho',
+  'view_dashboard_rh',
+  'view_dashboard_marketing'
+);
+
+-- ======================
+-- 5) USUÁRIOS (Usuarios)
+-- ======================
+-- OBS: Postgres não tem ENUM nativo como MySQL, geralmente usa TYPE customizado ou VARCHAR com CHECK
+-- Considere ajustar o tipo da coluna setor conforme sua modelagem.
+
+INSERT INTO usuarios (id_usuario, nome, email, senha_hash, setor, data_criacao, data_atualizacao)
+VALUES
+  (1, 'Administrador', 'admin@mcsonae.com',
+     '$2b$12$doyxOVWumhcGMCqk2FtWK.e7YZk/xN.vZ8HkWxhZbyj/v1EJL9IBO',  
+     NULL, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP),
+  (2, 'Inês Pereira', 'ines.pereira@mcsonae.com',
+     'ines123',                
+     'Retalho', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP),
+  (3, 'Ricardo Fernandes', 'ricardo.fernandes@mcsonae.com',
+     'ricardo123',            
+     NULL, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP);
+
+-- ==================================
+-- 6) USUÁRIO x PAPEL (Usuario_Papeis)
+-- ==================================
+INSERT INTO usuario_papeis (id_usuario_fk, id_papel_fk) VALUES
+  (1, 1),   -- Admin → Administrador
+  (2, 4),   -- Inês → Analista
+  (3, 3);   -- Ricardo → Gestor de Projetos
