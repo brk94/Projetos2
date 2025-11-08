@@ -9,6 +9,11 @@ Seções:
 - Ações por item (Restaurar / Excluir permanentemente)
 - Lista de projetos excluídos
 - Sumário de atividade recente
+
+Destaques dos comentários:
+- Por que o gate de permissões é feito antes de qualquer listagem
+- Motivo de usar `@st.cache_data(ttl=10)` para a lista de excluídos
+- Observações sobre `req_*` (wrappers de requisições) e tratamento de erros
 """
 
 # ======================================================================================
@@ -22,23 +27,6 @@ from ui_nav import garantir_sessao_e_permissoes, render_menu_lateral, req_get, r
 from pathlib import Path
 from base64 import b64encode
 
-# ======================================================================================
-# Utilitários de imagem (robustos)
-# ======================================================================================
-def _load_image_b64(filename: str) -> str | None:
-    here = Path(__file__).resolve().parent
-    candidates = [
-        here / "images" / filename,
-        Path.cwd() / "pages" / "images" / filename,
-        here / filename,
-    ]
-    for p in candidates:
-        if p.exists():
-            try:
-                return b64encode(p.read_bytes()).decode()
-            except Exception:
-                pass
-    return None
 
 # Config da página (título/ícone/layout) + CSS para esconder a nav padrão
 st.set_page_config(page_title="Gerenciar Exclusões", page_icon="🗑️", layout="wide")
@@ -52,11 +40,14 @@ button[kind="header"]{display:none!important}
     unsafe_allow_html=True,
 )
 
-_icon_b64 = _load_image_b64("remove.png")
+ICON_PATH = Path(__file__).parent / "images" / "remove.png"
+icon_b64 = b64encode(ICON_PATH.read_bytes()).decode()
+
 st.markdown(
     f"""
 <div style="display:flex;align-items:center;gap:8px;">
-  {'<img src="data:image/png;base64,' + _icon_b64 + '" alt="Remove icon" style="width:48px;height:48px;object-fit:contain;border-radius:4px;" />' if _icon_b64 else '🗑️'}
+  <img src="data:image/png;base64,{icon_b64}" alt="Remove icon"
+       style="width:48px;height:48px;object-fit:contain;border-radius:4px;" />
   <h1 style="margin:0;">Gerenciar Exclusões</h1>
 </div>
 """,
@@ -66,8 +57,13 @@ st.markdown(
 st.caption("Gerencie projetos marcados com Soft Delete. Você pode restaurá-los ou excluí-los permanentemente.")
 
 # ======================================================================================
-# Gate de sessão/permissão (early-exit)
+# Gate de sessão/permissão (early‑exit)
 # ======================================================================================
+# - `garantir_sessao_e_permissoes()` retorna as permissões correntes do usuário.
+# - `render_menu_lateral()` desenha o menu considerando a página atual.
+# - Gate: só permite a página para quem possui pelo menos UMA das permissões listadas
+#   (gerenciar usuários, gerenciar papéis, excluir relatório) OU a permissão específica
+#   de acesso à página de exclusões do admin.
 perms = garantir_sessao_e_permissoes()
 render_menu_lateral(perms, current_page="admin_exclusoes")
 perms_lower = {p.lower() for p in (perms or [])}
@@ -76,13 +72,17 @@ if not ( {"gerenciar_usuarios", "gerenciar_papeis", "excluir_relatorio"} & perms
     st.warning("Página não disponível para seu perfil.")
     st.stop()
 
-# Domínio de setores
+# Domínio de setores (usado em filtros e KPIs)
 SETORES = ["Retalho", "TI", "Marketing", "RH"]
 
 # ======================================================================================
 # Helpers locais
 # ======================================================================================
+
 def _formatar_data(iso_or_none: str | None) -> str:
+    """Converte ISO8601 (ou None) → dd/mm/aaaa HH:MM, com fallback seguro.
+    Aceita também strings com sufixo "Z" (UTC).
+    """
     if not iso_or_none:
         return "—"
     try:
@@ -91,12 +91,17 @@ def _formatar_data(iso_or_none: str | None) -> str:
     except Exception:
         return iso_or_none
 
+
 @st.cache_data(ttl=10)
 def carregar_deletados():
+    """Busca a lista de projetos com `is_deletado=1` do endpoint admin.
+    Cache com TTL curto (10s) evita chamadas repetidas ao navegar/filtrar.
+    """
     r = req_get("/admin/projetos/excluidos")
     if r.status_code == 200:
         return r.json()
     raise RuntimeError(r.json().get("detail") if "application/json" in r.headers.get("content-type","") else r.text)
+
 
 # ======================================================================================
 # Carga inicial de dados (com tratamento de erro de rede/API)
@@ -140,7 +145,7 @@ st.markdown(f"""
         <div class="kpi-label">Exclusões Retalho</div>
         <div class="kpi-value">{tot_retalho}</div>
       </div>
-      <span class="kpi-icon">🛒</span>
+      <span class="kpi-icon">🛒	</span>
     </div>
     <div class="kpi-item" style="--accent:#3B82F6">
       <div class="kpi-copy">
@@ -160,38 +165,41 @@ st.markdown(f"""
 </div>
 
 <style>
-.kpi-card{
+/* Card único dos KPIs — escopo local */
+.kpi-card{{
   background:#FFFFFF; border:1px solid #E2E8F0; border-radius:16px;
   padding:12px 14px; margin-bottom:12px;
-}
-.kpi-grid{
+}}
+.kpi-grid{{
   display:grid; grid-template-columns:repeat(5, 1fr); gap:0;
-}
-.kpi-item{
+}}
+.kpi-item{{
   position:relative; display:flex; align-items:center; justify-content:space-between;
   padding:12px 16px; border-right:1px solid #E5E7EB;
-}
-.kpi-item:last-child{ border-right:none; }
-.kpi-item::before{
+}}
+.kpi-item:last-child{{ border-right:none; }}
+.kpi-item::before{{
   content:""; position:absolute; left:8px; top:10px; bottom:10px; width:4px;
   background:var(--accent); border-radius:4px;
-}
-.kpi-copy{ padding-left:12px; }
-.kpi-label{ font-size:.9rem; color:#475569; margin-bottom:4px; }
-.kpi-value{ font-weight:700; font-size:1.25rem; color:var(--accent); }
-.kpi-icon{ opacity:.9; font-size:1.15rem; }
+}}
+.kpi-copy{{ padding-left:12px; }}
+.kpi-label{{ font-size:.9rem; color:#475569; margin-bottom:4px; }}
+.kpi-value{{ font-weight:700; font-size:1.25rem; color:var(--accent); }}
+.kpi-icon{{ opacity:.9; font-size:1.15rem; }}
 
-@media (max-width: 1100px){
-  .kpi-grid{ grid-template-columns:repeat(2,1fr); }
-  .kpi-item{ border-right:none; border-bottom:1px solid #E5E7EB; }
-  .kpi-item:last-child{ border-bottom:none; }
-}
+@media (max-width: 1100px){{
+  .kpi-grid{{ grid-template-columns:repeat(2,1fr); }}
+  .kpi-item{{ border-right:none; border-bottom:1px solid #E5E7EB; }}
+  .kpi-item:last-child{{ border-bottom:none; }}
+}}
 </style>
 """, unsafe_allow_html=True)
 
 # ======================================================================================
-# Filtros (texto e setor) + ação de atualizar
+# Filtros (texto e setor) + ação de atualizar (invalidar cache)
 # ======================================================================================
+# - O botão Atualizar limpa o cache de `carregar_deletados()` e força `rerun()`.
+# - O filtro de texto confere tanto `codigo_projeto` quanto `nome_projeto` (case‑insensitive).
 c1, c2, c3 = st.columns([2, 1.2, 0.8])
 with c1:
     q = st.text_input("Buscar por código ou nome do projeto", placeholder="ex.: PROJ-001 ou Projeto X")
@@ -203,7 +211,9 @@ with c3:
         carregar_deletados.clear()
         st.rerun()
 
+
 def filtros(item: dict) -> bool:
+    """Aplica os filtros do select (setor) e do campo de busca."""
     if setor_sel != "Todos" and (item.get("area_negocio") or "") != setor_sel:
         return False
     if q:
@@ -220,6 +230,10 @@ if not items:
 # ======================================================================================
 # Ações (REST) — Restaurar e Excluir Permanentemente
 # ======================================================================================
+# Observação:
+# - `req_post` e `req_delete` são wrappers que já incluem headers e lidam com sessão.
+# - Após sucesso, limpamos o cache e chamamos `st.rerun()` para refletir o novo estado.
+
 def restaurar(codigo: str, label: str):
     try:
         r = req_post(f"/admin/projetos/{codigo}/restaurar")
@@ -231,6 +245,7 @@ def restaurar(codigo: str, label: str):
             st.error(r.json().get("detail") if "application/json" in r.headers.get("content-type","") else r.text)
     except Exception as e:
         st.error(f"Erro de rede: {e}")
+
 
 def excluir_perm(codigo: str, label: str, motivo: str | None):
     try:
@@ -280,7 +295,7 @@ for item in items:
                         excluir_perm(cod, f"{nome} ({cod})", motivo_conf)
 
 # ======================================================================================
-# Atividade recente
+# Atividade recente (card + aviso em card separado)
 # ======================================================================================
 st.subheader("Atividade Recente")
 
@@ -315,6 +330,7 @@ st.markdown(f"""
 </div>
 
 <style>
+/* Card da Atividade Recente — escopo local */
 .recent-card {{
   background:#FFFFFF;
   border:1px solid #E2E8F0;
@@ -342,9 +358,11 @@ st.markdown(f"""
 @media (max-width: 900px) {{
   .recent-label {{ min-width:160px; }}
 }}
+
+/* Card de aviso separado (amarelo suave) */
 .note-card {{
-  background:#FFFBEB;
-  border:1px solid #F59E0B33;
+  background:#FFFBEB;                /* amarelo clarinho */
+  border:1px solid #F59E0B33;        /* borda sutil */
   color:#92400E;
   border-radius:16px;
   padding:12px 14px;
