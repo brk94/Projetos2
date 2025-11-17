@@ -138,7 +138,7 @@ button[kind="secondary"]:active{ transform:scale(0.98)!important; }
 # ======================================================================================
 # Sessão + permissões e navegação lateral
 # ======================================================================================
-perms = garantir_sessao_e_permissoes()
+perms = garantir_sessao_e_permissoes(require_perm="realizar_upload_relatorio")
 if not st.session_state.get("logged_in") or not st.session_state.get("auth_token"):
     st.switch_page("Home.py")
 render_menu_lateral(perms, current_page="processar")
