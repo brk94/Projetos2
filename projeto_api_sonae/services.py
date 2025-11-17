@@ -204,6 +204,30 @@ class AIService:
             print(f"AVISO: Falha ao resumir relatório ARIES: {e}")
             return "Não foi possível gerar o resumo automático do relatório ARIES."
 
+    def _tentar_parse_json(self, raw: str) -> dict | None:
+        """
+        Tenta fazer parse rígido do JSON que vem do modelo. 
+        """
+        import json
+        raw = raw.strip()
+
+        # 1) Tentativa direta
+        try:
+            return json.loads(raw)
+        except Exception:
+            pass
+
+        # 2) Tentar extrair bloco válido { ... }
+        if "{" in raw and "}" in raw:
+            try:
+                sub = raw[raw.find("{"): raw.rfind("}") + 1]
+                return json.loads(sub)
+            except Exception:
+                pass
+
+        # 3) Falhou mesmo
+        return None
+
     def gerar_insights_aries(self, texto: str) -> dict:
         """
         Interpreta um relatório ARIES e devolve um dicionário estruturado

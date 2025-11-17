@@ -329,9 +329,8 @@ st.markdown('<div class="aries-main">', unsafe_allow_html=True)
 
 st.title("Relatório ARIES — Interpretação com IA")
 st.caption(
-    "Envie o relatório ARIES (ex.: **ARIES periodic report - part B total v04 vSONAE.docx**) "
-    "para gerar um resumo visual com IA, em cima de Work Packages, pilotos e tabelas — "
-    "sem salvar nada em banco de dados."
+    "Envie um relatório (ex.: **ARIES periodic report - part B total v04 vSONAE.docx**) "
+    "para gerar um resumo visual com IA e NLP."
 )
 
 st.divider()
@@ -345,7 +344,7 @@ uploaded = st.file_uploader(
 if uploaded is not None:
     st.info(f"Arquivo selecionado: **{uploaded.name}**")
 
-    if st.button("Interpretar com IA 🚀", use_container_width=True):
+    if st.button("Interpretar com IA", use_container_width=True):
         with st.spinner("Lendo o arquivo e gerando insights com IA..."):
             try:
                 files = {
