@@ -83,42 +83,28 @@ def _inicializar_refresh_silencioso() -> bool:
 
 def fazer_login(email: str, senha: str):
     try:
-        resp = requests.post(
-            f"{API_URL}/token",
-            data={"username": email, "password": senha},
-            timeout=10,
-        )
+        r = requests.post(f"{API_URL}/token", data={"username": email, "password": senha}, timeout=10)
+        if r.status_code == 200:
+            data = r.json() or {}
+            # guarda tudo no estado
+            st.session_state["logged_in"] = True
+            st.session_state["user_email"] = email
+            st.session_state["auth_token"] = data.get("access_token", "")
+            st.session_state["refresh_token"] = data.get("refresh_token", "")
+
+            # persiste o refresh na URL para sobreviver ao F5
+            qp = dict(st.query_params)
+            qp["rt"] = st.session_state["refresh_token"]
+            qp["u"] = st.session_state["user_email"]
+            st.query_params = qp
+
+            # carrega permissões e segue
+            garantir_sessao_e_permissoes(force_reload=True)
+            st.rerun()
+        else:
+            st.error("Email ou senha incorretos.")
     except requests.ConnectionError:
         st.error("Não foi possível conectar à API. O servidor backend está online?")
-        return
-
-    if resp.status_code != 200:
-        st.error("Email ou senha incorretos.")
-        return
-
-    data = resp.json() or {}
-    access_token = data.get("access_token") or ""
-    refresh_token = data.get("refresh_token") or ""
-
-    if not access_token or not refresh_token:
-        st.error("Erro ao receber tokens de autenticação.")
-        return
-
-    # guarda tudo no estado
-    st.session_state["logged_in"] = True
-    st.session_state["user_email"] = email
-    st.session_state["auth_token"] = access_token
-    st.session_state["refresh_token"] = refresh_token
-
-    # persiste o refresh na URL para sobreviver ao F5
-    qp = dict(st.query_params)
-    qp["rt"] = refresh_token
-    qp["u"] = email
-    st.query_params = qp
-
-    # carrega/força recarregar permissões e segue
-    garantir_sessao_e_permissoes(force_reload=True)
-    st.rerun()
 
 # --- Recupera refresh token da URL para sobreviver ao F5 ---
 # Ex.: http://localhost:8501/?rt=<refresh_token>&u=<email>
