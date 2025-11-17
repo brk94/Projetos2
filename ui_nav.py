@@ -480,7 +480,9 @@ def render_menu_lateral(perms: list[str] | None, current_page: str | None = None
                            active=(current_page == "admin_usuarios"))
             _nav_link_pagina_navegacao("Gerenciar Exclusões", "🗑️", "pages/Gerenciar_Exclusoes.py",
                            active=(current_page == "admin_exclusoes"))
-
+            _nav_link_pagina_navegacao("Projeto ARIES (DEMO)", "🚧", "pages/4_Aries.py",
+                           active=(current_page == "aries"))
+            
         _nav_link_pagina_navegacao("About", "ℹ️", "pages/7_About.py", active=(current_page == "about"))
 
         # Sair (igual aos demais, mas executa logout)

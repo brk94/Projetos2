@@ -138,6 +138,186 @@ class AIService:
             return self._sanitizar_resumo_ptbr(raw) or (report_data.resumo_executivo or "")
         except Exception:
             return report_data.resumo_executivo or "Resumo original não disponível."
+        
+    def resumir_aries_relatorio(self, texto: str) -> str:
+        """
+        Gera um resumo em PT-BR do relatório ARIES (em inglês),
+        organizado em seções de markdown. Não persiste nada, só
+        devolve uma string grande para o frontend.
+        """
+        if not isinstance(texto, str):
+            if isinstance(texto, (bytes, bytearray)):
+                texto = texto.decode("utf-8", errors="ignore")
+            else:
+                texto = str(texto)
+
+        # Para não estourar o contexto do modelo, recorta se for gigante
+        max_chars = 30000
+        trecho = texto[:max_chars]
+
+        prompt = f"""
+        Você é um especialista em projetos de identidade digital e privacidade na Europa.
+
+        A seguir está um trecho de um relatório do projeto ARIES (em inglês).
+        Gere um resumo em **português do Brasil**, organizado com markdown simples, usando
+        as seções abaixo (use títulos `##`):
+
+        ## Visão geral do projeto ARIES
+        - Contexto e objetivo geral do projeto
+
+        ## Papel da SONAE / SONAE MC
+        - Qual o papel da SONAE no piloto / cenário descrito
+        - Principais responsabilidades e atividades
+
+        ## Principais atividades e resultados
+        - Work packages ou tarefas relevantes
+        - Demonstrações / pilotos / experimentos realizados
+        - Resultados alcançados (quando descritos)
+
+        ## Riscos, desafios e lições aprendidas
+        - Riscos mencionados, dificuldades, limitações
+        - Lições aprendidas ou recomendações
+
+        ## Pontos que podem inspirar o MC Sonae (projeto acadêmico)
+        - 3 a 5 bullets conectando o que aparece no ARIES com ideias
+        que poderiam ser aplicadas numa plataforma de dashboards
+        e monitoramento de projetos
+
+        INSTRUÇÕES:
+        - Não invente informação. Use apenas o que aparecer no texto.
+        - Se alguma seção não tiver informação, escreva uma frase curta
+        dizendo que o relatório não traz detalhes suficientes.
+        - Não use código, não use blocos ```; apenas markdown simples.
+
+        TRECHO DO RELATÓRIO (em inglês):
+        \"\"\"{trecho}\"\"\"
+        """.strip()
+
+        try:
+            resp = self.gemini_model.generate_content(
+                prompt,
+                generation_config=self.gemini_config,
+            )
+            raw = (getattr(resp, "text", None) or str(resp) or "").strip()
+            return self._sanitizar_resumo_ptbr(raw)
+        except Exception as e:
+            print(f"AVISO: Falha ao resumir relatório ARIES: {e}")
+            return "Não foi possível gerar o resumo automático do relatório ARIES."
+
+    def gerar_insights_aries(self, texto: str) -> dict:
+        """
+        Interpreta um relatório ARIES e devolve um dicionário estruturado
+        em termos de Work Packages (WP1..WP7), pilotos/cenários e tabelas
+        relevantes. Não mexe em banco de dados.
+        """
+        if not isinstance(texto, str):
+            if isinstance(texto, (bytes, bytearray)):
+                texto = texto.decode("utf-8", errors="ignore")
+            else:
+                texto = str(texto)
+
+        max_chars = 30000
+        trecho = texto[:max_chars]
+
+        prompt = f"""
+        Você é um especialista em projetos europeus de I&D e em documentação de Work Packages.
+
+        A seguir está um trecho de um relatório do projeto ARIES (em inglês).
+        O documento menciona Work Packages (WP1, WP2, ..., WP7), pilotos/cenários (por ex. e-commerce, aeroporto)
+        e várias tabelas (por exemplo: cronogramas, KPIs, parceiros, resultados).
+
+        Sua tarefa é analisar o texto (incluindo o conteúdo das tabelas, quando for descrito em texto)
+        e devolver um JSON ESTRUTURADO em português do Brasil, exatamente no formato abaixo:
+
+        {{
+        "visao_geral": "Texto curto explicando o contexto e objetivo geral do projeto ARIES.",
+        "papel_sonae": "Explicação específica do papel da SONAE / SONAE MC no projeto e nos pilotos.",
+        "work_packages": [
+            {{
+            "id": "WP1",
+            "titulo": "Título resumido do WP1 (em português, se possível).",
+            "objetivo": "Objetivo principal do WP1.",
+            "status": "planejado ou em_andamento ou concluido ou atrasado ou nao_mencionado",
+            "principais_atividades": [
+                "Atividade relevante do WP1 descrita no relatório.",
+                "Outra atividade relevante do WP1."
+            ],
+            "principais_resultados": [
+                "Resultado importante do WP1, se mencionado.",
+                "Outro resultado importante do WP1."
+            ]
+            }},
+            {{
+            "id": "WP2",
+            "titulo": "...",
+            "objetivo": "...",
+            "status": "...",
+            "principais_atividades": [],
+            "principais_resultados": []
+            }}
+        ],
+        "pilotos": [
+            {{
+            "nome": "Nome do piloto/cenário (ex.: e-commerce cross-border)",
+            "descricao": "Descrição resumida do que é testado nesse piloto.",
+            "work_packages_relacionados": ["WP2", "WP4"],
+            "status": "em_andamento ou concluido ou planejado ou nao_mencionado",
+            "principais_resultados": [
+                "Resultado ou evidência relevante mencionada para esse piloto."
+            ],
+            "kpis": [
+                "KPIs, métricas ou indicadores que aparecem no relatório."
+            ]
+            }}
+        ],
+        "tabelas_relevantes": [
+            {{
+            "titulo": "Título resumido da tabela (se houver).",
+            "tema": "Tema da tabela (ex.: cronograma, KPIs, parceiros).",
+            "descricao": "Resumo em 1-3 frases do que a tabela mostra."
+            }}
+        ],
+        "riscos": [
+            "Riscos ou desafios relevantes mencionados no texto."
+        ],
+        "licoes": [
+            "Lições aprendidas ou recomendações mencionadas."
+        ],
+        "ideias_mc_sonae": [
+            "Ideia 1 de como aproveitar algo do ARIES no projeto MC Sonae.",
+            "Ideia 2...",
+            "Ideia 3..."
+        ]
+        }}
+
+        INSTRUÇÕES IMPORTANTES:
+        - Preencha o máximo de campos possível COM BASE NO TEXTO.
+        - Não invente informações que não estejam claramente implícitas ou explícitas.
+        - Se algum campo não tiver informação suficiente, deixe listas vazias ou use
+          valores genéricos como "nao_mencionado" para status.
+        - Use IDs de WPs reais que aparecerem no texto (WP1, WP2, ..., WP7).
+        - Tudo deve estar em português do Brasil, mas você pode manter nomes próprios
+          e siglas em inglês.
+        - Respeite ESTRITAMENTE a estrutura do JSON acima.
+        - Não coloque comentários, não coloque texto fora do JSON.
+        - Não retorne ``` nem blocos de código, apenas JSON puro.
+
+        TRECHO DO RELATÓRIO (em inglês):
+        \"\"\"{trecho}\"\"\"
+        """.strip()
+
+        try:
+            resp = self.gemini_model.generate_content(
+                prompt,
+                generation_config=self.gemini_config,
+            )
+            raw = (getattr(resp, "text", None) or str(resp) or "").strip()
+            parsed = self._tentar_parse_json(raw)
+            return parsed or {}
+        except Exception as e:
+            print(f"AVISO: Falha ao gerar insights estruturados do ARIES: {e}")
+            return {}
+
 
 # ======================================================================================
 # DatabaseRepository — todas as operações ORM

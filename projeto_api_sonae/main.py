@@ -23,7 +23,9 @@ from fastapi import FastAPI, UploadFile, File, HTTPException, BackgroundTasks, F
 from fastapi.security import OAuth2PasswordRequestForm, OAuth2PasswordBearer
 from typing import List, Annotated, Set, Optional
 from pydantic import BaseModel
+from pdfminer.high_level import extract_text as pdf_extract_text
 import io
+import docx
 import uuid
 import os
 from jose import jwt, JWTError
@@ -601,3 +603,60 @@ def admin_grant_acesso(codigo: str, id_usuario: int = Body(...), papel: str = Bo
 def admin_revoke_acesso(codigo: str, id_usuario: int, _admin = Depends(require_admin)):
     repository.revogar_acesso_projeto(codigo_projeto=codigo, id_usuario=id_usuario)
     return {"message": "Acesso removido."}
+
+# ======================================================================================
+# Helpers internos — extração de texto para ARIES (docx/pdf)
+# ======================================================================================
+def _extrair_texto_docx(data: bytes) -> str:
+    """Extrai texto plano de um arquivo .docx em memória."""
+    doc = docx.Document(io.BytesIO(data))
+    paragraphs = [p.text.strip() for p in doc.paragraphs]
+    return "\n".join(p for p in paragraphs if p)
+
+
+def _extrair_texto_pdf(data: bytes) -> str:
+    """Extrai texto de um PDF usando pdfminer."""
+    try:
+        return pdf_extract_text(io.BytesIO(data))
+    except Exception as e:
+        print(f"Falha ao extrair texto do PDF: {e}")
+        return ""
+
+# ======================================================================================
+# Endpoint ARIES — interpretação com IA (somente Admin; sem banco)
+# ======================================================================================
+@app.post("/aries/interpretar")
+async def interpretar_aries(
+    file: UploadFile = File(...),
+    _admin: models.Usuario = Depends(require_admin),
+):
+    """
+    Recebe um arquivo do projeto ARIES (docx/pdf), extrai o texto e
+    devolve um JSON de insights gerado pela AIService, sem persistir nada.
+    """
+    if not file.filename:
+        raise HTTPException(status_code=400, detail="Arquivo inválido.")
+
+    raw = await file.read()
+    if not raw:
+        raise HTTPException(status_code=400, detail="Arquivo vazio.")
+
+    fname = file.filename.lower()
+    if fname.endswith(".docx"):
+        texto = _extrair_texto_docx(raw)
+    elif fname.endswith(".pdf"):
+        texto = _extrair_texto_pdf(raw)
+    else:
+        raise HTTPException(
+            status_code=400,
+            detail="Formato não suportado. Envie .docx ou .pdf.",
+        )
+
+    if not texto.strip():
+        raise HTTPException(
+            status_code=400,
+            detail="Não foi possível extrair texto do arquivo enviado.",
+        )
+
+    insights = ai_service.gerar_insights_aries(texto)
+    return {"conteudo": insights}
