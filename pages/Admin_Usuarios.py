@@ -4,13 +4,13 @@ Página Streamlit — Admin • Gerenciar Usuários
 Seções:
 - Setup da página (visual) e Segurança/Navegação
 - Utilities (wrappers para API + cache curto)
-- Tab 1: Usuários (busca, edição de setor, modal “Gerenciar Acesso”)
+- Tab 1: Usuários (busca, edição de setor, modal “Gerenciar Acesso”, hard delete)
 - Tab 2: Solicitações de Acesso (listar e decidir)
 
 Destaques de leitura:
-- **Mapeamento de chaves**: normaliza respostas do backend (cód/nome/área) para o multiselect.
-- **Filtro por Setor** no modal: lista apenas projetos do mesmo setor do usuário alvo.
-- **Cache & Rerun**: `@st.cache_data(ttl=10)` + `clear()` + `st.rerun()` ao salvar/cancelar.
+- Mapeamento de chaves (normaliza respostas do backend no catálogo de projetos)
+- Filtro por Setor no modal: lista apenas projetos do mesmo setor do usuário alvo
+- Cache & Rerun: @st.cache_data(ttl=10) + clear() + st.rerun() após ações
 """
 
 # ======================================================================================
@@ -22,9 +22,6 @@ from ui_nav import (
     render_menu_lateral,
     req_get, req_put, req_post, req_delete,
 )
-
-from pathlib import Path
-from base64 import b64encode
 
 # Config de página + CSS (só visual; mantém comportamento)
 st.set_page_config(page_title="Admin • Gerenciar Usuários", page_icon="👥", layout="wide")
@@ -43,21 +40,17 @@ button[kind="header"]{display:none!important}
     unsafe_allow_html=True,
 )
 
-ICON_PATH = Path(__file__).parent / "images" / "gerenciar.png"
-icon_b64 = b64encode(ICON_PATH.read_bytes()).decode()
-
+# Título (sem imagem local)
 st.markdown(
-    f"""
-<div style="display:flex;align-items:center;gap:8px;">
-  <img src="data:image/png;base64,{icon_b64}" alt="Gerenciar icon"
-       style="width:48px;height:48px;object-fit:contain;border-radius:4px;" />
+    """
+<div style="display:flex;align-items:center;gap:10px;">
+  <div style="font-size:38px;line-height:1;">🛠️</div>
   <h1 style="margin:0;">Gerenciar Usuários</h1>
 </div>
 """,
     unsafe_allow_html=True,
 )
-
-st.caption("Gerencie usuários e solicitações de acesso ao sistema")
+st.caption("Gerencie usuários, acessos e solicitações de entrada no sistema.")
 
 # ======================================================================================
 # Segurança / Navegação (gate inicial)
@@ -82,12 +75,11 @@ def _try_get(url: str):
     r = req_get(url)
     return (r.status_code, r.json() if r and r.headers.get("content-type", "").startswith("application/json") else None)
 
-
 @st.cache_data(ttl=10)
 def _admin_listar_projetos():
     """Catálogo de projetos para o multiselect do modal.
     1) Tenta `/admin/projetos/lista`; 2) fallback para `/projetos/lista/`.
-    3) **Normaliza chaves** (código/nome/área) para evitar variações vindas do backend.
+    3) Normaliza chaves (código/nome/área) para evitar variações vindas do backend.
     """
     status, data = _try_get("/admin/projetos/lista")
     if status != 200 or not data:
@@ -122,11 +114,9 @@ def _admin_listar_projetos():
             })
     return norm
 
-
 def _admin_listar_acessos_usuario(id_usuario: int):
     r = req_get(f"/admin/usuarios/{id_usuario}/acessos")
     return r.json() if r and r.status_code == 200 else []
-
 
 def _admin_conceder_acesso(id_usuario: int, codigo_projeto: str, papel: str | None = None):
     payload = {"codigo_projeto": codigo_projeto}
@@ -134,10 +124,8 @@ def _admin_conceder_acesso(id_usuario: int, codigo_projeto: str, papel: str | No
         payload["papel"] = papel
     return req_post(f"/admin/usuarios/{id_usuario}/acessos", json=payload)
 
-
 def _admin_revogar_acesso(id_usuario: int, codigo_projeto: str):
     return req_delete(f"/admin/usuarios/{id_usuario}/acessos/{codigo_projeto}")
-
 
 def _load_users(q_):
     """Busca lista de usuários (admin). Propaga mensagens de erro da API na UI."""
@@ -267,8 +255,8 @@ with tab_usuarios:
             with st.expander(header, expanded=False):
 
                 if is_admin_user:
-                    # Admin não muda setor/acessos por aqui (somente leitura)
-                    c1, c3, c4 = st.columns([3, 1, 1], vertical_alignment="center")
+                    # Admin: somente leitura (sem alterar setor e sem excluir)
+                    c1, c3 = st.columns([3, 1], vertical_alignment="center")
                     with c1:
                         st.text_input(
                             "Nome",
@@ -277,60 +265,97 @@ with tab_usuarios:
                             label_visibility="collapsed",
                             disabled=True,
                         )
-                    with c3: st.caption("Administrador")
-                    with c4: st.caption(" ")
-
-                else:
-                    c1, c2, c3, c4 = st.columns([2, 2, 1, 1], vertical_alignment="center")
-
-                    with c1:
-                        st.text_input(
-                            "Nome",
-                            value=u["nome"],
-                            key=f"nome_{u['id_usuario']}",
-                            label_visibility="collapsed",
-                            disabled=True,
-                        )
-
-                    with c2:
-                        # Select de setor com default no valor atual (se existir)
-                        opcoes = [""] + ["Retalho", "TI", "Marketing", "RH"]
-                        idx = opcoes.index(setor_str) if setor_str in opcoes else 0
-                        setor = st.selectbox(
-                            "Setor",
-                            opcoes,
-                            index=idx,
-                            key=f"setor_{u['id_usuario']}",
-                            label_visibility="collapsed",
-                        )
-
                     with c3:
-                        if st.button("💾 Salvar", key=f"save_{u['id_usuario']}", use_container_width=True):
-                            try:
-                                prev_setor = setor_str or ""
-                                new_setor  = setor or ""
-                                changed_setor = (prev_setor != new_setor)
-                                if not changed_setor:
-                                    st.info("Nenhuma alteração a salvar.")
-                                else:
-                                    payload = {"setor": (setor or None)}
-                                    r = req_put(f"/admin/usuarios/{u['id_usuario']}", json=payload)
-                                    if r.status_code == 200:
-                                        st.session_state["flash_toast"] = (
-                                            f"Usuário {u['nome']} ({u['email']}): Setor alterado de "
-                                            f"{prev_setor or '—'} para {new_setor or '—'}."
-                                        )
-                                        _admin_listar_projetos.clear()
-                                        _try_get.clear()
-                                        st.rerun()
-                                    else:
-                                        st.error(r.json().get("detail") if "application/json" in r.headers.get("content-type", "") else r.text)
-                            except Exception as e:
-                                st.error(f"Erro: {e}")
+                        st.caption("Administrador")
+                    st.caption("Usuários com cargo 'Administrador' não podem ser alterados/excluídos por aqui.")
+                    continue
 
-                    with c4:
-                        if st.button("🔐 Gerenciar Acesso", key=f"acc_{u['id_usuario']}", use_container_width=True):
-                            st.session_state["modal_user_acesso"] = u
+                # Usuários não-admin: Nome (readonly), Setor, Salvar, Acesso, Excluir
+                c1, c2, c3, c4, c5 = st.columns([2, 2, 1, 1, 1], vertical_alignment="center")
+
+                with c1:
+                    st.text_input(
+                        "Nome",
+                        value=u["nome"],
+                        key=f"nome_{u['id_usuario']}",
+                        label_visibility="collapsed",
+                        disabled=True,
+                    )
+
+                with c2:
+                    opcoes = [""] + ["Retalho", "TI", "Marketing", "RH"]
+                    idx = opcoes.index(setor_str) if setor_str in opcoes else 0
+                    setor = st.selectbox(
+                        "Setor",
+                        opcoes,
+                        index=idx,
+                        key=f"setor_{u['id_usuario']}",
+                        label_visibility="collapsed",
+                    )
+
+                with c3:
+                    if st.button("💾 Salvar", key=f"save_{u['id_usuario']}", use_container_width=True):
+                        try:
+                            prev_setor = setor_str or ""
+                            new_setor  = setor or ""
+                            changed_setor = (prev_setor != new_setor)
+                            if not changed_setor:
+                                st.info("Nenhuma alteração a salvar.")
+                            else:
+                                payload = {"setor": (setor or None)}
+                                r = req_put(f"/admin/usuarios/{u['id_usuario']}", json=payload)
+                                if r.status_code == 200:
+                                    st.session_state["flash_toast"] = (
+                                        f"Usuário {u['nome']} ({u['email']}): Setor alterado de "
+                                        f"{prev_setor or '—'} para {new_setor or '—'}."
+                                    )
+                                    _admin_listar_projetos.clear()
+                                    _try_get.clear()
+                                    st.rerun()
+                                else:
+                                    st.error(r.json().get("detail") if "application/json" in r.headers.get("content-type", "") else r.text)
+                        except Exception as e:
+                            st.error(f"Erro: {e}")
+
+                with c4:
+                    if st.button("🔐 Gerenciar Acesso", key=f"acc_{u['id_usuario']}", use_container_width=True):
+                        st.session_state["modal_user_acesso"] = u
+                        st.rerun()
+
+                # Hard delete (com confirmação)
+                with c5:
+                    if st.button("🗑️ Excluir", key=f"del_{u['id_usuario']}", use_container_width=True):
+                        st.session_state[f"confirm_del_{u['id_usuario']}"] = True
+                        st.rerun()
+
+                # Diálogo simples de confirmação
+                if st.session_state.get(f"confirm_del_{u['id_usuario']}"):
+                    st.warning(f"Confirmar EXCLUSÃO DEFINITIVA de **{u['nome']} ({u['email']})**?")
+                    cc1, cc2 = st.columns(2)
+                    with cc1:
+                        if st.button("Confirmar exclusão", key=f"confirm_go_{u['id_usuario']}", use_container_width=True):
+                            try:
+                                r = req_delete(f"/admin/usuarios/{u['id_usuario']}")
+                                if r is not None and r.status_code in (200, 204):
+                                    st.session_state.pop(f"confirm_del_{u['id_usuario']}", None)
+                                    st.session_state["flash_toast"] = "Usuário removido."
+                                    _admin_listar_projetos.clear()
+                                    _try_get.clear()
+                                    st.rerun()
+                                else:
+                                    # tenta extrair detalhe
+                                    detail = None
+                                    try:
+                                        if r is not None and "application/json" in r.headers.get("content-type", ""):
+                                            detail = r.json().get("detail")
+                                    except Exception:
+                                        pass
+                                    st.error(detail or "Falha ao excluir usuário.")
+                            except Exception as e:
+                                st.error(f"Erro ao excluir: {e}")
+                    with cc2:
+                        if st.button("Cancelar", key=f"cancel_del_{u['id_usuario']}", use_container_width=True):
+                            st.session_state.pop(f"confirm_del_{u['id_usuario']}", None)
                             st.rerun()
 
 # ======================================================================================

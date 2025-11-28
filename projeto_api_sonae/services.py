@@ -33,6 +33,7 @@ from jose import JWTError, jwt
 import bcrypt
 import re
 import unicodedata
+import json
 
 # --- Imports do SQLAlchemy ---
 from . import models
@@ -207,7 +208,218 @@ class AIService:
         except Exception as e:
             print(f"AVISO: Falha ao gerar resumo com Gemini: {e}")
             return report_data.resumo_executivo or "Resumo original não disponível."
+        
+    def resumir_aries_relatorio(self, texto: str) -> str:
+        """
+        Gera um resumo em PT-BR do relatório ARIES (em inglês),
+        organizado em seções de markdown. Não persiste nada, só
+        devolve uma string grande para o frontend.
+        """
+        if not isinstance(texto, str):
+            if isinstance(texto, (bytes, bytearray)):
+                texto = texto.decode("utf-8", errors="ignore")
+            else:
+                texto = str(texto)
 
+        # Para não estourar o contexto do modelo, recorta se for gigante
+        max_chars = 30000
+        trecho = texto[:max_chars]
+
+        prompt = f"""
+        Você é um especialista em projetos de identidade digital e privacidade na Europa.
+
+        A seguir está um trecho de um relatório do projeto ARIES (em inglês).
+        Gere um resumo em **português do Brasil**, organizado com markdown simples, usando
+        as seções abaixo (use títulos `##`):
+
+        ## Visão geral do projeto ARIES
+        - Contexto e objetivo geral do projeto
+
+        ## Papel da SONAE / SONAE MC
+        - Qual o papel da SONAE no piloto / cenário descrito
+        - Principais responsabilidades e atividades
+
+        ## Principais atividades e resultados
+        - Work packages ou tarefas relevantes
+        - Demonstrações / pilotos / experimentos realizados
+        - Resultados alcançados (quando descritos)
+
+        ## Riscos, desafios e lições aprendidas
+        - Riscos mencionados, dificuldades, limitações
+        - Lições aprendidas ou recomendações
+
+        ## Pontos que podem inspirar o MC Sonae (projeto acadêmico)
+        - 3 a 5 bullets conectando o que aparece no ARIES com ideias
+        que poderiam ser aplicadas numa plataforma de dashboards
+        e monitoramento de projetos
+
+        INSTRUÇÕES:
+        - Não invente informação. Use apenas o que aparecer no texto.
+        - Se alguma seção não tiver informação, escreva uma frase curta
+        dizendo que o relatório não traz detalhes suficientes.
+        - Não use código, não use blocos ```; apenas markdown simples.
+
+        TRECHO DO RELATÓRIO (em inglês):
+        \"\"\"{trecho}\"\"\"
+        """.strip()
+
+        try:
+            resp = self.gemini_model.generate_content(
+                prompt,
+                generation_config=self.gemini_config,
+            )
+            raw = (getattr(resp, "text", None) or str(resp) or "").strip()
+            return self._sanitizar_resumo_ptbr(raw)
+        except Exception as e:
+            print(f"AVISO: Falha ao resumir relatório ARIES: {e}")
+            return "Não foi possível gerar o resumo automático do relatório ARIES."
+
+    def gerar_insights_aries(self, texto: str) -> dict:
+        """
+        Interpreta um relatório ARIES e devolve um dicionário estruturado
+        em termos de Work Packages (WP1..WP7), pilotos/cenários e tabelas
+        relevantes. Não mexe em banco de dados.
+        """
+        if not isinstance(texto, str):
+            if isinstance(texto, (bytes, bytearray)):
+                texto = texto.decode("utf-8", errors="ignore")
+            else:
+                texto = str(texto)
+
+        max_chars = 30000
+        trecho = texto[:max_chars]
+
+        prompt = f"""
+        Você é um especialista em projetos europeus de I&D e em documentação de Work Packages.
+
+        A seguir está um trecho de um relatório do projeto ARIES (em inglês).
+        O documento menciona Work Packages (WP1, WP2, ..., WP7), pilotos/cenários (por ex. e-commerce, aeroporto)
+        e várias tabelas (por exemplo: cronogramas, KPIs, parceiros, resultados).
+
+        Sua tarefa é analisar o texto (incluindo o conteúdo das tabelas, quando for descrito em texto)
+        e devolver um JSON ESTRUTURADO em português do Brasil, exatamente no formato abaixo:
+
+        {{
+        "visao_geral": "Texto curto explicando o contexto e objetivo geral do projeto ARIES.",
+        "papel_sonae": "Explicação específica do papel da SONAE / SONAE MC no projeto e nos pilotos.",
+        "work_packages": [
+            {{
+            "id": "WP1",
+            "titulo": "Título resumido do WP1 (em português, se possível).",
+            "objetivo": "Objetivo principal do WP1.",
+            "status": "planejado ou em_andamento ou concluido ou atrasado ou nao_mencionado",
+            "principais_atividades": [
+                "Atividade relevante do WP1 descrita no relatório.",
+                "Outra atividade relevante do WP1."
+            ],
+            "principais_resultados": [
+                "Resultado, entrega ou output concreto atribuído ao WP1.",
+                "Outro resultado relevante."
+            ]
+            }},
+            {{
+            "id": "WP2",
+            "titulo": "...",
+            "objetivo": "...",
+            "status": "...",
+            "principais_atividades": [...],
+            "principais_resultados": [...]
+            }}
+            // Repita para WP3..WP7, somente se houver informações no relatório.
+        ],
+        "pilotos": [
+            {{
+            "nome": "Piloto de e-commerce SONAE",
+            "descricao": "Resumo do que foi feito nesse piloto.",
+            "status": "planejado ou em_andamento ou concluido ou atrasado",
+            "work_packages_relacionados": ["WP4", "WP5"],
+            "principais_kpis": [
+                "Ex: 16 utilizadores no primeiro piloto em 2017.",
+                "Ex: piloto ampliado em 2018 com versão 2 do demonstrador."
+            ]
+            }},
+            {{
+            "nome": "Piloto de aeroporto",
+            "descricao": "Se houver informações sobre esse cenário.",
+            "status": "planejado ou em_andamento ou concluido ou atrasado",
+            "work_packages_relacionados": ["WP4", "WP6"],
+            "principais_kpis": [
+                "Descreva KPIs se existirem, senão explique que não estão detalhados."
+            ]
+            }}
+        ],
+        "tabelas_relevantes": [
+            {{
+            "titulo": "Título ou identificação aproximada da tabela (ex.: Tabela 1 – Overview of pilots).",
+            "tema": "tema da tabela (ex.: pilotos, cronograma, KPIs, parceiros, riscos, etc.)",
+            "descricao": "Resumo em 1–2 frases do que essa tabela mostra (sem copiar números)."
+            }}
+        ],
+        "riscos": [
+            "Riscos, desafios ou problemas mencionados no relatório.",
+            "Inclua atrasos, dependências de parceiros, limitações técnicas, etc."
+        ],
+        "licoes": [
+            "Lições aprendidas, recomendações ou boas práticas identificadas.",
+            "Inclua aprendizados sobre gestão de piloto, requisitos legais, privacidade, etc."
+        ],
+        "ideias_mc_sonae": [
+            "Ideia de como algo do ARIES pode inspirar o projeto acadêmico MC Sonae.",
+            "Conecte com dashboards, KPIs, gestão de continuidade, privacidade, etc."
+        ]
+        }}
+
+        Regras importantes:
+        - NÃO escreva nada fora do JSON acima.
+        - NÃO use markdown no conteúdo dos campos (sem **negrito**, sem bullets markdown).
+        - Use strings simples, listas simples.
+        - Se alguma informação não existir no relatório, use frases curtas indicando que não há detalhes suficientes.
+        - Considere também as tabelas descritas no texto para preencher os campos.
+        - Não invente Work Packages ou pilotos que não existam no texto; apenas resuma o que estiver mencionado.
+
+        TRECHO DO RELATÓRIO (em inglês):
+        \"\"\"{trecho}\"\"\"
+        """.strip()
+
+        base = {
+            "visao_geral": "",
+            "papel_sonae": "",
+            "work_packages": [],
+            "pilotos": [],
+            "tabelas_relevantes": [],
+            "riscos": [],
+            "licoes": [],
+            "ideias_mc_sonae": [],
+        }
+
+        try:
+            resp = self.gemini_model.generate_content(
+                prompt,
+                generation_config=self.gemini_config,
+            )
+            raw = (getattr(resp, "text", None) or str(resp) or "").strip()
+
+            try:
+                data = json.loads(raw)
+            except json.JSONDecodeError:
+                # Plano B: tentar achar o bloco entre { ... }
+                if "{" in raw and "}" in raw:
+                    sub = raw[raw.find("{"): raw.rfind("}") + 1]
+                    data = json.loads(sub)
+                else:
+                    raise
+
+            # Garante apenas as chaves que esperamos
+            for k in base.keys():
+                if k in data:
+                    base[k] = data[k]
+
+            return base
+
+        except Exception as e:
+            print(f"AVISO: Falha ao gerar insights ARIES: {e}")
+            return base
+        
 # ======================================================================================
 # DatabaseRepository (ORM + Refresh Tokens + Regras)
 # ======================================================================================
@@ -797,7 +1009,10 @@ class DatabaseRepository:
             db.close()
 
     def decidir_solicitacao(self, id_solic: int, admin_id: int, decisao: str, motivo: Optional[str] = None):
-        """Fluxo de aprovação/rejeição — mantém todas as validações e *side-effects* originais."""
+        """Aprova ou rejeita a solicitação **sem deletar o registro**.
+        - rejeitar  -> status='rejeitado', mantém linha
+        - aprovar   -> cria usuário + vínculo de papel, status='aprovado'
+        """
         db: Session = self._get_db()
         try:
             sol = db.get(models.UsuarioSolicitacaoAcesso, id_solic)
@@ -810,15 +1025,16 @@ class DatabaseRepository:
             if decisao_norm not in {"aprovar", "rejeitar"}:
                 raise RuntimeError("Decisão inválida.")
 
+            # ===== REJEITAR (não deleta) =====
             if decisao_norm == "rejeitar":
                 sol.status = "rejeitado"
+                sol.motivo_decisao = (motivo or None)
                 sol.decidido_por = admin_id
                 sol.decidido_em = datetime.utcnow()
-                sol.motivo_decisao = (motivo or None)
                 db.commit()
-                return
+                return {"message": "Solicitação rejeitada."}
 
-            # Aprovação
+            # ===== APROVAR =====
             cargo = (sol.cargo or "").strip()
             papel = db.query(models.Papel).filter(models.Papel.nome == cargo).first()
             if not papel:
@@ -834,36 +1050,43 @@ class DatabaseRepository:
                 nome=(sol.nome or "").strip(),
                 email=email_norm,
                 senha_hash=sol.senha_hash,
-                setor=(sol.setor or None)
+                setor=(sol.setor or None),
             )
             db.add(novo)
             db.flush()  # obtém novo.id_usuario
 
+            # Vincula papel se ainda não tiver
             ja_tem = (
                 db.query(models.UsuarioPapel)
                 .filter(
                     models.UsuarioPapel.id_usuario_fk == novo.id_usuario,
-                    models.UsuarioPapel.id_papel_fk == papel.id_papel
+                    models.UsuarioPapel.id_papel_fk == papel.id_papel,
                 )
                 .first()
             )
             if not ja_tem:
                 db.add(models.UsuarioPapel(
                     id_usuario_fk=novo.id_usuario,
-                    id_papel_fk=papel.id_papel
+                    id_papel_fk=papel.id_papel,
+                    # se teu modelo NÃO tem esse campo, não passe 'criado_em'
                 ))
 
+            # Marca decisão (mantém a linha; não deleta)
             sol.status = "aprovado"
+            sol.motivo_decisao = (motivo or None)
             sol.decidido_por = admin_id
             sol.decidido_em = datetime.utcnow()
-            sol.motivo_decisao = (motivo or None)
 
             db.commit()
+            return {"message": "Solicitação aprovada."}
+
         except Exception:
             db.rollback()
             raise
         finally:
             db.close()
+
+
 
     def atualizar_usuario_limitado(self, *, id_usuario: int, nome: str | None, setor: str | None) -> None:
         db: Session = self._get_db()
@@ -1347,6 +1570,63 @@ class DatabaseRepository:
             ).delete(synchronize_session=False)
             db.commit()
             return {"message": "Acesso removido."}
+        except Exception:
+            db.rollback()
+            raise
+        finally:
+            db.close()
+
+    def hard_delete_usuario(self, *, id_usuario: int) -> bool:
+        """
+        Hard delete (MySQL/ORM): remove DEFINITIVAMENTE o usuário e dependências,
+        usando .query(...).filter(...).update(...) / .delete(...), sem update().where().values().
+        """
+        db = self._get_db()
+        try:
+            u = db.query(models.Usuario).get(id_usuario)
+            if not u:
+                return False
+
+            # 1) Refresh tokens do usuário
+            (
+                db.query(models.RefreshToken)
+                .filter(models.RefreshToken.id_usuario_fk == id_usuario)
+                .delete(synchronize_session=False)
+            )
+
+            # 2) Papéis do usuário (tabela ponte)
+            (
+                db.query(models.UsuarioPapel)
+                .filter(models.UsuarioPapel.id_usuario_fk == id_usuario)
+                .delete(synchronize_session=False)
+            )
+
+            # 3) Acessos do usuário aos projetos (tabela ponte)
+            (
+                db.query(models.ProjetoUsuarioAcesso)
+                .filter(models.ProjetoUsuarioAcesso.id_usuario_fk == id_usuario)
+                .delete(synchronize_session=False)
+            )
+
+            # 4) Desassociar como gerente de projetos (FK -> NULL)
+            (
+                db.query(models.Projeto)
+                .filter(models.Projeto.id_gerente_fk == id_usuario)
+                .update({models.Projeto.id_gerente_fk: None}, synchronize_session=False)
+            )
+
+            # 5) Desassociar como autor de relatórios (FK -> NULL)
+            (
+                db.query(models.RelatorioSprint)
+                .filter(models.RelatorioSprint.id_autor_fk == id_usuario)
+                .update({models.RelatorioSprint.id_autor_fk: None}, synchronize_session=False)
+            )
+
+            # 6) Remover usuário
+            db.delete(u)
+
+            db.commit()
+            return True
         except Exception:
             db.rollback()
             raise

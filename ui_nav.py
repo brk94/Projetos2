@@ -468,18 +468,41 @@ def render_menu_lateral(perms: list[str] | None, current_page: str | None = None
 
         can_view_dash_ti = (is_admin or ("view_dashboard_ti" in perms_lower)) and (is_admin or eh_usuario_ti)
         if can_view_dash_ti:
-            _nav_link_pagina_navegacao("Dashboard (TI)", "📊", "pages/3_Dashboard.py",
-                           active=(current_page in {"dashboard", "dash_ti"}))
+            _nav_link_pagina_navegacao(
+                "Dashboard (TI)",
+                "📊",
+                "pages/3_Dashboard.py",
+                active=(current_page in {"dashboard", "dash_ti"})
+            )
 
         if "realizar_upload_relatorio" in perms_lower:
-            _nav_link_pagina_navegacao("Processar Relatórios", "📤", "pages/2_Processar_Relatórios.py",
-                           active=(current_page == "processar"))
+            _nav_link_pagina_navegacao(
+                "Processar Relatórios",
+                "📤",
+                "pages/2_Processar_Relatórios.py",
+                active=(current_page == "processar")
+            )
 
         if is_admin:
-            _nav_link_pagina_navegacao("Gerenciar Usuários", "👥", "pages/Admin_Usuarios.py",
-                           active=(current_page == "admin_usuarios"))
-            _nav_link_pagina_navegacao("Gerenciar Exclusões", "🗑️", "pages/Gerenciar_Exclusoes.py",
-                           active=(current_page == "admin_exclusoes"))
+            _nav_link_pagina_navegacao(
+                "Gerenciar Usuários",
+                "👥",
+                "pages/Admin_Usuarios.py",
+                active=(current_page == "admin_usuarios")
+            )
+            _nav_link_pagina_navegacao(
+                "Gerenciar Exclusões",
+                "🗑️",
+                "pages/Gerenciar_Exclusoes.py",
+                active=(current_page == "admin_exclusoes")
+            )
+            # NOVO item: página ARIES (NLP) — somente Administrador
+            _nav_link_pagina_navegacao(
+                "Projeto ARIES (DEMO)",
+                "🚧",
+                "pages/4_Aries.py",
+                active=(current_page == "aries")
+            )
 
         _nav_link_pagina_navegacao("About", "ℹ️", "pages/7_About.py", active=(current_page == "about"))
 
@@ -487,6 +510,7 @@ def render_menu_lateral(perms: list[str] | None, current_page: str | None = None
         _nav_logout("Sair")
 
         st.markdown('</div>', unsafe_allow_html=True)
+
 
 # ============================
 # Outros helpers
